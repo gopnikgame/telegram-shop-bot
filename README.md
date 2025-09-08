@@ -26,12 +26,12 @@
 <p align="center">
   <img src="docs/orders.png" alt="Заказы" width="480" />
 </p>
-<p>
+<p align="center">
   <img src="docs/admin.png" alt="Админка" width="320" />
   <img src="docs/new-item.png" alt="Новый заказ" width="320" />
 </p>
-<p>
-  <img src="docs/bot.png" alt="Бот" width="320" />
+<p align="center">
+  <img src="docs/bot.png" alt="Бот" width="240" />
 </p>
 
 ## Быстрый старт (Docker)
