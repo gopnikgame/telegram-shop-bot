@@ -13,6 +13,7 @@ class PricingType(str, Enum):
 class ItemType(str, Enum):
     SERVICE = "service"
     DIGITAL = "digital"
+    OFFLINE = "offline"
 
 
 class Item(Base):

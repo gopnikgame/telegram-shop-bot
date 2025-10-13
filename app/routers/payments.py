@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Header, Request, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func, delete
+from sqlalchemy.exc import IntegrityError
+from loguru import logger
 
 from app.db.session import get_db_session
-from app.models import Order, Item, Purchase, ItemType, OrderStatus, User, ItemCode
+from app.models import Order, Item, Purchase, ItemType, OrderStatus, User, ItemCode, CartItem
 from aiogram import Bot
 from bot.webhook_app import bot as global_bot
 from app.config import settings
@@ -15,7 +17,6 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 
 
 def get_bot() -> Bot:
-    # Используем общий экземпляр бота, чтобы не открывать/не закрывать сессии на каждый запрос
     return global_bot
 
 
@@ -26,32 +27,26 @@ async def yookassa_webhook(
     db: AsyncSession = Depends(get_db_session),
     bot: Bot = Depends(get_bot),
 ) -> dict:
-    # Верификация Basic (если включена)
     if not verify_webhook_basic(authorization):
         raise HTTPException(status_code=401, detail="unauthorized")
 
     payload = await request.json()
-    # Опциональная проверка IP (усиление безопасности)
     try:
         peer = request.client.host if request.client else None
     except Exception:
         peer = None
     if peer and not is_trusted_yookassa_ip(peer):
-        # Не блокируем, просто пишем краткий лог
-        from loguru import logger
         logger.bind(event="yk.webhook").info("Webhook ЮKassa от IP вне списка доверенных: {ip}", ip=peer)
 
-    # Webhook формата YooKassa: {event, object:{id,status,amount,metadata,...}}
     obj = payload.get("object", {}) if isinstance(payload, dict) else {}
     event = payload.get("event") if isinstance(payload, dict) else None
     metadata = obj.get("metadata", {}) if isinstance(obj, dict) else {}
     status = obj.get("status")
 
-    # Нас интересует только успешная оплата
     if not (event == "payment.succeeded" and status == "succeeded"):
         return {"ok": True}
 
-    # Донаты: нет orderId, обрабатываем отдельно
+    # ========== ДОНАТЫ ==========
     donation_raw = metadata.get("donation")
     donation_flag = False
     if isinstance(donation_raw, bool):
@@ -83,7 +78,7 @@ async def yookassa_webhook(
                 pass
         return {"ok": True}
 
-    # Счета, созданные вручную администратором (без orderId)
+    # ========== АДМИН-СЧЕТА ==========
     admin_invoice_raw = metadata.get("admin_invoice")
     admin_invoice_flag = False
     if isinstance(admin_invoice_raw, bool):
@@ -105,71 +100,317 @@ async def yookassa_webhook(
                 pass
         return {"ok": True}
 
-    # Покупки: ожидаем наличие paymentId и работаем с заказом
+    # ========== ОФФЛАЙН ЗАКАЗЫ (НОВОЕ) ==========
+    offline_order_id_raw = metadata.get("offline_order_id")
+    if offline_order_id_raw:
+        try:
+            order = (await db.execute(
+                select(Order).where(Order.id == int(offline_order_id_raw))
+            )).scalar_one_or_none()
+            
+            if not order:
+                raise HTTPException(status_code=404, detail="offline order not found")
+            
+            if order.status == OrderStatus.PAID:
+                return {"ok": True}
+            
+            # Получаем все покупки с данными доставки
+            purchases = (await db.execute(
+                select(Purchase).where(Purchase.order_id == order.id)
+            )).scalars().all()
+            
+            if not purchases:
+                logger.warning(f"No purchases found for offline order {order.id}")
+            
+            # Обновляем статус заказа
+            order.status = OrderStatus.PAID
+            await db.commit()
+            
+            # Отправляем уведомление администратору с данными доставки
+            if settings.admin_chat_id and purchases:
+                try:
+                    # Получаем товары
+                    item_ids = [p.item_id for p in purchases if p.item_id]
+                    items = (await db.execute(
+                        select(Item).where(Item.id.in_(item_ids))
+                    )).scalars().all()
+                    
+                    items_text = "\n".join([f"• {item.title} - {item.price_minor/100:.2f} ₽" for item in items])
+                    
+                    # Берем данные доставки из первой покупки (они одинаковые для всех товаров в заказе)
+                    first_purchase = purchases[0]
+                    
+                    buyer_username = None
+                    if order.buyer_tg_id:
+                        buyer_username = (await db.execute(
+                            select(User.username).where(User.tg_id == int(order.buyer_tg_id))
+                        )).scalar_one_or_none()
+                    
+                    message = (
+                        f"💳 *ОФФЛАЙН ЗАКАЗ #{order.id} ОПЛАЧЕН*\n\n"
+                        f"*Товары:*\n{items_text}\n\n"
+                        f"*Сумма:* `{order.amount_minor/100:.2f}` ₽\n\n"
+                        f"📦 *Данные доставки:*\n"
+                        f"👤 ФИО: {first_purchase.delivery_fullname or '—'}\n"
+                        f"📞 Телефон: {first_purchase.delivery_phone or '—'}\n"
+                        f"📍 Адрес: {first_purchase.delivery_address or '—'}\n"
+                    )
+                    
+                    if first_purchase.delivery_comment:
+                        message += f"💬 Комментарий: {first_purchase.delivery_comment}\n"
+                    
+                    message += f"\n👥 Покупатель: {order.buyer_tg_id}"
+                    if buyer_username:
+                        message += f" (@{buyer_username})"
+                    
+                    await bot.send_message(
+                        chat_id=int(settings.admin_chat_id),
+                        text=message,
+                        parse_mode="Markdown"
+                    )
+                    logger.info(f"Sent offline order paid notification to admin for order #{order.id}")
+                except Exception as e:
+                    logger.error(f"Failed to send offline order notification: {e}")
+            
+            # Отправляем подтверждение пользователю
+            if order.buyer_tg_id:
+                try:
+                    user_message = (
+                        "✅ *Оплата получена!*\n\n"
+                        f"📦 Заказ #{order.id} успешно оплачен\n"
+                        f"💰 Сумма: `{order.amount_minor/100:.2f}` ₽\n\n"
+                        "Администратор свяжется с вами в ближайшее время для уточнения деталей доставки."
+                    )
+                    await bot.send_message(
+                        chat_id=int(order.buyer_tg_id),
+                        text=user_message,
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send confirmation to user: {e}")
+            
+            return {"ok": True}
+        
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception("Критическая ошибка обработки оффлайн заказа: {}", e)
+            await db.rollback()
+            raise HTTPException(status_code=500, detail="Internal server error")
+
+    # ========== КОРЗИНА ==========
+    cart_order_id_raw = metadata.get("cart_order_id")
+    if cart_order_id_raw:
+        try:
+            order = (await db.execute(
+                select(Order).where(Order.id == int(cart_order_id_raw))
+            )).scalar_one_or_none()
+            
+            if not order:
+                raise HTTPException(status_code=404, detail="cart order not found")
+            
+            if order.status == OrderStatus.PAID:
+                return {"ok": True}
+            
+            purchases = (await db.execute(
+                select(Purchase).where(Purchase.order_id == order.id)
+            )).scalars().all()
+            
+            # Резервируем коды ДО изменения статуса заказа
+            codes_to_deliver = []
+            for purchase in purchases:
+                item = (await db.execute(
+                    select(Item).where(Item.id == purchase.item_id)
+                )).scalar_one_or_none()
+                
+                if not item:
+                    continue
+                
+                allocated_code: str | None = None
+                if item.item_type == ItemType.DIGITAL and item.delivery_type == 'codes':
+                    code_row = (await db.execute(
+                        select(ItemCode)
+                        .where(ItemCode.item_id == item.id, ItemCode.is_sold == False)
+                        .limit(1)
+                        .with_for_update(skip_locked=True)
+                    )).scalars().first()
+                    
+                    if not code_row:
+                        logger.error(
+                            "Код закончился при обработке платежа | order_id={} item_id={}",
+                            order.id, item.id
+                        )
+                        raise HTTPException(
+                            status_code=500, 
+                            detail=f"Item {item.title} out of stock"
+                        )
+                    
+                    code_row.is_sold = True
+                    code_row.sold_order_id = order.id
+                    allocated_code = code_row.code
+                
+                codes_to_deliver.append((item, allocated_code))
+            
+            order.status = OrderStatus.PAID
+            await db.commit()
+            
+            delivery = DeliveryService(bot)
+            for item, code in codes_to_deliver:
+                try:
+                    if code:
+                        text = f"<b>{code}</b>"
+                        await bot.send_message(
+                            int(order.buyer_tg_id), 
+                            text, 
+                            reply_markup=None, 
+                            parse_mode="HTML"
+                        )
+                    await delivery.deliver(int(order.buyer_tg_id), item)
+                except Exception as e:
+                    logger.error(
+                        "Ошибка доставки | order_id={} item={} error={}",
+                        order.id, item.title, e
+                    )
+            
+            if settings.admin_chat_id:
+                try:
+                    texts = load_texts().get("notifications", {})
+                    template = texts.get("cart_paid") or (
+                        "🛒 Оплата корзины получена\n"
+                        "Товаров: {items_count}\nСумма: {amount} ₽\n"
+                        "Покупатель: {buyer} {buyer_username}\nЗаказ: {order_id}"
+                    )
+                    buyer_username = None
+                    if order.buyer_tg_id:
+                        buyer_username = (await db.execute(
+                            select(User.username).where(User.tg_id == int(order.buyer_tg_id))
+                        )).scalar_one_or_none()
+                    text = template.format(
+                        items_count=len(purchases),
+                        amount=f"{order.amount_minor/100:.2f}",
+                        buyer=order.buyer_tg_id or "-",
+                        buyer_username=(f"@{buyer_username}" if buyer_username else ""),
+                        order_id=order.id,
+                    )
+                    await bot.send_message(int(settings.admin_chat_id), text)
+                except Exception as e:
+                    logger.error("Ошибка отправки уведомления админу: {}", e)
+            
+            return {"ok": True}
+        
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception("Критическая ошибка обработки корзины: {}", e)
+            await db.rollback()
+            raise HTTPException(status_code=500, detail="Internal server error")
+    
+    # ========== ОБЫЧНЫЕ ЗАКАЗЫ (ОДИН ТОВАР) ==========
     payment_id = metadata.get("paymentId")
     if not payment_id:
         raise HTTPException(status_code=400, detail="paymentId missing")
 
-    order = (await db.execute(select(Order).where(Order.id == int(payment_id)))).scalar_one_or_none()
-    if not order:
-        raise HTTPException(status_code=404, detail="order not found")
+    try:
+        order = (await db.execute(
+            select(Order).where(Order.id == int(payment_id))
+        )).scalar_one_or_none()
+        
+        if not order:
+            raise HTTPException(status_code=404, detail="order not found")
 
-    # Идемпотентность: если уже paid — просто 200 OK
-    if order.status == OrderStatus.PAID:
-        return {"ok": True}
+        if order.status == OrderStatus.PAID:
+            return {"ok": True}
 
-    order.status = "paid"
+        order.status = OrderStatus.PAID
 
-    item = (await db.execute(select(Item).where(Item.id == order.item_id))).scalar_one_or_none()
-    if item:
-        purchase = Purchase(order_id=order.id, user_id=order.user_id, item_id=item.id, delivery_info=None)
-        db.add(purchase)
-
-        # Попытка выдать текстовый код, если есть в наличии
+        item = (await db.execute(
+            select(Item).where(Item.id == order.item_id)
+        )).scalar_one_or_none()
+        
         allocated_code: str | None = None
-        if item.item_type == ItemType.DIGITAL and item.delivery_type == 'codes':
-            code_row = (await db.execute(
-                select(ItemCode).where(ItemCode.item_id == item.id, ItemCode.is_sold == False)
-            )).scalars().first()
-            if code_row:
+        if item:
+            purchase = Purchase(
+                order_id=order.id, 
+                user_id=order.user_id, 
+                item_id=item.id, 
+                delivery_info=None
+            )
+            db.add(purchase)
+
+            # ✅ Атомарная резервация кода
+            if item.item_type == ItemType.DIGITAL and item.delivery_type == 'codes':
+                code_row = (await db.execute(
+                    select(ItemCode)
+                    .where(ItemCode.item_id == item.id, ItemCode.is_sold == False)
+                    .limit(1)
+                    .with_for_update(skip_locked=True)
+                )).scalars().first()
+                
+                if not code_row:
+                    logger.error(
+                        "Код закончился при обработке платежа | order_id={} item_id={}",
+                        order.id, item.id
+                    )
+                    raise HTTPException(
+                        status_code=500, 
+                        detail=f"Item {item.title} out of stock"
+                    )
+                
                 code_row.is_sold = True
                 code_row.sold_order_id = order.id
                 allocated_code = code_row.code
 
-        if order.buyer_tg_id:
+        await db.commit()
+
+        # ✅ Доставка вне транзакции
+        if order.buyer_tg_id and item:
             delivery = DeliveryService(bot)
             try:
                 if allocated_code:
-                    # Отправляем код жирным (HTML)
                     text = f"<b>{allocated_code}</b>"
-                    await bot.send_message(int(order.buyer_tg_id), text, reply_markup=None, parse_mode="HTML")
-                    await delivery.deliver(int(order.buyer_tg_id), item)
-                else:
-                    await delivery.deliver(int(order.buyer_tg_id), item)
-            except Exception:
-                pass
+                    await bot.send_message(
+                        int(order.buyer_tg_id), 
+                        text, 
+                        reply_markup=None, 
+                        parse_mode="HTML"
+                    )
+                await delivery.deliver(int(order.buyer_tg_id), item)
+            except Exception as e:
+                logger.error(
+                    "Ошибка доставки | order_id={} buyer={} error={}",
+                    order.id, order.buyer_tg_id, e
+                )
 
-    await db.commit()
+        # Уведомление админу
+        if settings.admin_chat_id:
+            try:
+                texts = load_texts().get("notifications", {})
+                template = texts.get("order_paid") or (
+                    "💳 Оплата получена\n"
+                    "Товар: {item}\nСумма: {amount} ₽\n"
+                    "Покупатель: {buyer} {buyer_username}\nЗаказ: {order_id}"
+                )
+                buyer_username = None
+                if order.buyer_tg_id:
+                    buyer_username = (await db.execute(
+                        select(User.username).where(User.tg_id == int(order.buyer_tg_id))
+                    )).scalar_one_or_none()
+                text = template.format(
+                    item=item.title if item else "Донат",
+                    amount=f"{order.amount_minor/100:.2f}",
+                    buyer=order.buyer_tg_id or "-",
+                    buyer_username=(f"@{buyer_username}" if buyer_username else ""),
+                    order_id=order.id,
+                )
+                await bot.send_message(int(settings.admin_chat_id), text)
+            except Exception as e:
+                logger.error("Ошибка отправки уведомления админу: {}", e)
 
-    if settings.admin_chat_id:
-        try:
-            texts = load_texts().get("notifications", {})
-            template = texts.get("order_paid") or (
-                "💳 Оплата получена\n"
-                "Товар: {item}\nСумма: {amount} ₽\nПокупатель: {buyer} {buyer_username}\nЗаказ: {order_id}"
-            )
-            buyer_username = None
-            if order.buyer_tg_id:
-                buyer_username = (await db.execute(select(User.username).where(User.tg_id == int(order.buyer_tg_id)))).scalar_one_or_none()
-            text = template.format(
-                item=item.title if item else "Донат",
-                amount=f"{order.amount_minor/100:.2f}",
-                buyer=order.buyer_tg_id or "-",
-                buyer_username=(f"@{buyer_username}" if buyer_username else ""),
-                order_id=order.id,
-            )
-            await bot.send_message(int(settings.admin_chat_id), text)
-        except Exception:
-            pass
-
-    return {"ok": True}
+        return {"ok": True}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Критическая ошибка обработки платежа: {}", e)
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Internal server error")

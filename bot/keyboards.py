@@ -3,13 +3,20 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from app.utils.texts import load_texts
 from app.config import settings
 
-def main_menu_kb(texts: dict, is_admin: bool = False) -> InlineKeyboardMarkup:
+def main_menu_kb(texts: dict, is_admin: bool = False, cart_count: int = 0) -> InlineKeyboardMarkup:
     b = texts["main_menu"]["buttons"]
     row1 = [
         InlineKeyboardButton(text=b["projects"], callback_data="menu:projects"),
     ]
     row2 = [InlineKeyboardButton(text=b["services"], callback_data="menu:services")]
     row3 = [InlineKeyboardButton(text=b["purchased"], callback_data="menu:purchased")]
+    
+    # Добавляем кнопку корзины с количеством товаров
+    cart_text = b.get("cart", "🛒 Корзина")
+    if cart_count > 0:
+        cart_text = f"{cart_text} ({cart_count})"
+    row_cart = [InlineKeyboardButton(text=cart_text, callback_data="menu:cart")]
+    
     row4 = []
     if settings.show_donate_button:
         row4 = [InlineKeyboardButton(text=b["donate"], callback_data="menu:donate")]
@@ -17,7 +24,7 @@ def main_menu_kb(texts: dict, is_admin: bool = False) -> InlineKeyboardMarkup:
         row5 = [InlineKeyboardButton(text=b["contact"], url=f"https://t.me/{settings.admin_tg_username.lstrip('@')}")]
     elif settings.show_contact_button:
         row5 = [InlineKeyboardButton(text=b["contact"], callback_data="menu:contact")]
-    rows = [row1, row2, row3]
+    rows = [row1, row2, row3, row_cart]
     if row4:
         rows.append(row4)
     if is_admin:
@@ -53,16 +60,26 @@ def items_list_kb(items: list, item_type: str, purchased_ids: set[int] | None = 
         kb.append(controls)
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
-def item_card_kb(item_id: int, item_type: str, purchased: bool = False, from_purchased: bool = False, page: int = 1) -> InlineKeyboardMarkup:
+def item_card_kb(item_id: int, item_type: str, purchased: bool = False, from_purchased: bool = False, page: int = 1, in_cart: bool = False) -> InlineKeyboardMarkup:
     texts = load_texts()
     rows = []
     back_cb = "back:purchased" if from_purchased else f"back:list:{item_type}:{page}"
+    
     if not purchased or item_type == "service":
-        rows.append([InlineKeyboardButton(text=texts["buttons"].get("buy", "Купить"), callback_data=f"buy_one:{item_id}")])
+        # Кнопка "Купить сейчас"
+        rows.append([InlineKeyboardButton(text=texts["buttons"].get("buy_now", "🛒 Купить сейчас"), callback_data=f"buy_one:{item_id}")])
+        
+        # Кнопка "Добавить в корзину" / "Убрать из корзины"
+        if in_cart:
+            rows.append([InlineKeyboardButton(text=texts["buttons"].get("remove_from_cart", "❌ Убрать из корзины"), callback_data=f"cart:remove:{item_id}")])
+        else:
+            rows.append([InlineKeyboardButton(text=texts["buttons"].get("add_to_cart", "➕ В корзину"), callback_data=f"cart:add:{item_id}")])
     else:
         rows.append([InlineKeyboardButton(text="✅ Уже куплено", callback_data=back_cb)])
+    
     rows.append([InlineKeyboardButton(text=texts["buttons"]["back"], callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
 
 def payment_method_kb(item_id: int) -> InlineKeyboardMarkup:
     texts = load_texts()
@@ -116,3 +133,62 @@ def donate_amounts_kb() -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton(text="Ввести сумму", callback_data="donate:custom")])
     rows.append([InlineKeyboardButton(text=load_texts()["buttons"]["back"], callback_data="back:main")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def cart_kb(items_in_cart: list, total_price: int) -> InlineKeyboardMarkup:
+    texts = load_texts()
+    kb = []
+    
+    for item in items_in_cart:
+        kb.append([
+            InlineKeyboardButton(
+                text=f"❌ {item.title} - {item.price_minor/100:.2f} ₽",
+                callback_data=f"cart:remove:{item.id}"
+            )
+        ])
+    
+    if items_in_cart:
+        kb.append([InlineKeyboardButton(
+            text=texts["buttons"].get("checkout", f"💳 Оплатить ({total_price/100:.2f} ₽)"),
+            callback_data="cart:checkout"
+        )])
+        kb.append([InlineKeyboardButton(
+            text=texts["buttons"].get("clear_cart", "🗑 Очистить корзину"),
+            callback_data="cart:clear"
+        )])
+    
+    kb.append([InlineKeyboardButton(text=texts["buttons"]["back"], callback_data="back:main")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+def skip_kb(callback_data: str) -> InlineKeyboardMarkup:
+    """Клавиатура с кнопкой 'Пропустить'"""
+    texts = load_texts()
+    kb = [
+        [InlineKeyboardButton(
+            text=texts.get("buttons", {}).get("skip", "⏭ Пропустить"),
+            callback_data=callback_data
+        )],
+        [InlineKeyboardButton(
+            text=texts["buttons"]["back"],
+            callback_data="menu:cart"
+        )]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+def order_confirmation_kb(order_id: str, is_pharmacy: bool=False) -> InlineKeyboardMarkup:
+    texts = load_texts()
+    kb = []
+    if is_pharmacy:
+        kb.append([InlineKeyboardButton(text=texts["buttons"]["back"], callback_data="menu:cart")])
+    else:
+        kb.append([InlineKeyboardButton(text="💰 Оплатить заказ", callback_data=f"pay:{order_id}")])
+        kb.append([InlineKeyboardButton(text="❌ Отменить заказ", callback_data=f"cancel_order:{order_id}")])
+        kb.append([InlineKeyboardButton(text=texts["buttons"]["back"], callback_data="menu:cart")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+def offline_delivery_kb() -> InlineKeyboardMarkup:
+    texts = load_texts()
+    kb = [
+        [InlineKeyboardButton(text=texts["buttons"].get("confirm", "✅ Подтвердить"), callback_data="order:confirm")],
+        [InlineKeyboardButton(text=texts["buttons"]["back"], callback_data="menu:cart")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)

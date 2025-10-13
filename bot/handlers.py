@@ -7,12 +7,25 @@ from pathlib import Path
 import contextlib
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
+from sqlalchemy.exc import IntegrityError
 
 from app.utils.texts import load_texts
-from .keyboards import main_menu_kb, back_kb, item_card_kb, payment_method_kb, items_list_kb, main_menu_only_kb, payment_link_kb, donate_amounts_kb, admin_menu_kb
+from .keyboards import (
+    main_menu_kb, 
+    back_kb, 
+    item_card_kb, 
+    payment_method_kb, 
+    items_list_kb, 
+    main_menu_only_kb, 
+    payment_link_kb, 
+    donate_amounts_kb, 
+    admin_menu_kb,
+    cart_kb,
+    skip_kb  # <- ДОБАВЛЕНО
+)
 from app.db.session import AsyncSessionLocal
-from app.models import Item, ItemType, User, Purchase
+from app.models import Item, ItemType, User, Purchase, CartItem, Order, PaymentMethod, OrderStatus, ItemCode
 from app.config import settings
 from app.services.orders_client import OrdersClient
 from app.services.yookassa import YooKassaClient
@@ -29,6 +42,14 @@ class AdminInvoiceStates(StatesGroup):
     waiting_for_amount = State()
 
 
+# ========== НОВЫЕ СОСТОЯНИЯ ДЛЯ ОФФЛАЙН ДОСТАВКИ ==========
+class OfflineDeliveryStates(StatesGroup):
+    waiting_for_fullname = State()
+    waiting_for_phone = State()
+    waiting_for_address = State()
+    waiting_for_comment = State()
+
+
 def _is_admin_user(tg_id: int | None, username: str | None) -> bool:
     try:
         if settings.admin_chat_id and tg_id is not None:
@@ -39,6 +60,44 @@ def _is_admin_user(tg_id: int | None, username: str | None) -> bool:
     if settings.admin_tg_username and username:
         return username.lstrip('@').lower() == settings.admin_tg_username.lstrip('@').lower()
     return False
+
+
+async def send_offline_order_to_admin(order_id: int, items: list, delivery_data: dict, bot) -> None:
+    """Отправка уведомления администратору о новом оффлайн заказе"""
+    if not settings.admin_chat_id:
+        logger.warning("Admin chat ID not configured, skipping admin notification")
+        return
+    
+    items_text = "\n".join([f"• {item.title} - {item.price_minor/100:.2f} ₽" for item in items])
+    total = sum(item.price_minor for item in items)
+    
+    message = (
+        f"🛍 *Новый заказ #{order_id}*\n\n"
+        f"*Товары:*\n{items_text}\n\n"
+        f"*Итого:* `{total/100:.2f}` ₽\n\n"
+        f"📦 *Данные доставки:*\n"
+        f"👤 ФИО: {delivery_data.get('fullname', '—')}\n"
+        f"📞 Телефон: {delivery_data.get('phone', '—')}\n"
+        f"📍 Адрес: {delivery_data.get('address', '—')}\n"
+    )
+    
+    if delivery_data.get('comment'):
+        message += f"💬 Комментарий: {delivery_data['comment']}\n"
+    
+    try:
+        await bot.send_message(
+            chat_id=int(settings.admin_chat_id),
+            text=message,
+            parse_mode="Markdown"
+        )
+        logger.info(f"Sent offline order notification to admin for order #{order_id}")
+    except Exception as e:
+        logger.error(f"Failed to send offline order notification: {e}")
+
+
+async def has_offline_items(items: list) -> bool:
+    """Проверка наличия оффлайн товаров в списке"""
+    return any(item.item_type == ItemType.OFFLINE for item in items)
 
 
 @router.message(F.text == "/start")
@@ -69,6 +128,10 @@ async def start_handler(message: Message) -> None:
             if (message.from_user.username or None) != u.username:
                 u.username = message.from_user.username or None
         await db.commit()
+        
+        cart_count = (await db.execute(
+            select(func.count()).select_from(CartItem).where(CartItem.user_id == u.id)
+        )).scalar_one()
 
     # Отправляем главное меню с картинкой если есть
     try:
@@ -78,13 +141,12 @@ async def start_handler(message: Message) -> None:
                 photo=photo,
                 caption=texts["main_menu"]["title"],
                 parse_mode="Markdown",
-                reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(message.from_user.id, message.from_user.username))
+                reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(message.from_user.id, message.from_user.username), cart_count=cart_count)
             )
         else:
-            await message.answer(texts["main_menu"]["title"], parse_mode="Markdown", reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(message.from_user.id, message.from_user.username)))
+            await message.answer(texts["main_menu"]["title"], parse_mode="Markdown", reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(message.from_user.id, message.from_user.username), cart_count=cart_count))
     except FileNotFoundError:
-        # Если файл не найден, отправляем без картинки
-        await message.answer(texts["main_menu"]["title"], reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(message.from_user.id, message.from_user.username)))
+        await message.answer(texts["main_menu"]["title"], reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(message.from_user.id, message.from_user.username), cart_count=cart_count))
 
 
 @router.message(F.text.startswith("/"))
@@ -103,10 +165,12 @@ async def quick_menu_commands(message: Message) -> None:
             user = (await db.execute(select(User).where(User.tg_id == message.from_user.id))).scalar_one_or_none()
             if not user:
                 await message.answer(texts.get("empty", {}).get("purchased", "У вас нет купленных проектов."))
+
                 return
             purchases = (await db.execute(select(Purchase).where(Purchase.user_id == user.id))).scalars().all()
             if not purchases:
                 await message.answer(texts.get("empty", {}).get("purchased", "У вас нет купленных проектов."))
+
                 return
             item_ids = [p.item_id for p in purchases if p.item_id is not None]
             items = (await db.execute(select(Item).where(Item.id.in_(item_ids)))).scalars().all()
@@ -338,7 +402,6 @@ async def cb_back(call: CallbackQuery) -> None:
     texts = load_texts()
     
     if action == "list" and item_type:
-        # Преобразуем строковый тип в ItemType
         item_type_mapping = {
             "digital": ItemType.DIGITAL,
             "service": ItemType.SERVICE,
@@ -353,29 +416,35 @@ async def cb_back(call: CallbackQuery) -> None:
             await call.answer()
             return
     if action == "purchased":
-        # Вернуться в список купленных
         async with AsyncSessionLocal() as db:
             user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
+            empty_text = texts.get("empty", {}).get("purchased", "У вас нет купленных проектов.")
             if not user:
-                await call.answer("Пользователь не найден", show_alert=True)
+                await call.answer(empty_text, show_alert=True)
                 return
             purchases = (await db.execute(select(Purchase).where(Purchase.user_id == user.id))).scalars().all()
             if not purchases:
-                await call.answer("У вас нет купленных проектов.", show_alert=True)
+                await call.answer(empty_text, show_alert=True)
                 return
+            # Получаем товары по id
             item_ids = [p.item_id for p in purchases if p.item_id is not None]
             items = (await db.execute(select(Item).where(Item.id.in_(item_ids)))).scalars().all()
+            # Формируем клавиатуру
             kb = []
             for item in items:
                 kb.append([InlineKeyboardButton(text=item.title, callback_data=f"item:{item.id}:{item.item_type.value}")])
-            kb.append([InlineKeyboardButton(text=load_texts()["buttons"]["back"], callback_data="back:main")])
-            title = load_texts()["main_menu"].get("purchased_title", "Ваши купленные проекты:")
-            image_path = load_texts()["main_menu"].get("images", {}).get("purchased")
+            kb.append([InlineKeyboardButton(text=texts["buttons"]["back"], callback_data="back:main")])
+
+            title = texts["main_menu"].get("purchased_title", "Ваши купленные проекты:")
+            image_path = texts["main_menu"].get("images", {}).get("purchased")
             try:
                 if call.message.photo:
                     if image_path and Path(image_path).is_file():
                         photo = FSInputFile(image_path)
-                        await call.message.edit_media(media=InputMediaPhoto(media=photo, caption=title), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+                        await call.message.edit_media(
+                            media=InputMediaPhoto(media=photo, caption=title),
+                            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+                        )
                     else:
                         await call.message.edit_caption(caption=title, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
                 else:
@@ -392,7 +461,6 @@ async def cb_back(call: CallbackQuery) -> None:
             await call.answer()
             return
     
-    # Default: return to main menu
     try:
         if "image" in texts["main_menu"]:
             photo = FSInputFile(texts["main_menu"]["image"])
@@ -422,6 +490,44 @@ async def cb_back(call: CallbackQuery) -> None:
                 await call.message.edit_text(texts["main_menu"]["title"], parse_mode="Markdown", reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username)))
         except FileNotFoundError:
             await call.message.edit_text(texts["main_menu"]["title"], parse_mode="Markdown", reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username)))
+    
+    async with AsyncSessionLocal() as db:
+        user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
+        cart_count = 0
+        if user:
+            cart_count = (await db.execute(
+                select(func.count()).select_from(CartItem).where(CartItem.user_id == user.id)
+            )).scalar_one()
+    await call.answer()
+    try:
+        if "image" in texts["main_menu"]:
+            photo = FSInputFile(texts["main_menu"]["image"])
+            await call.message.edit_media(
+                media=InputMediaPhoto(
+                    media=photo,
+                    caption=texts["main_menu"]["title"],
+                    parse_mode="Markdown"
+                ),
+                reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count)
+            )
+        else:
+            await call.message.edit_text(texts["main_menu"]["title"], parse_mode="Markdown", reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count))
+    except FileNotFoundError:
+        await call.message.edit_text(texts["main_menu"]["title"], parse_mode="Markdown", reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count))
+        try:
+            if "image" in texts["main_menu"]:
+                photo = FSInputFile(texts["main_menu"]["image"])
+                await call.message.answer_photo(
+                    photo=photo,
+                    caption=texts["main_menu"]["title"],
+                    parse_mode="Markdown",
+                    reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count)
+                )
+                await call.message.delete()
+            else:
+                await call.message.edit_text(texts["main_menu"]["title"], parse_mode="Markdown", reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count))
+        except FileNotFoundError:
+            await call.message.edit_text(texts["main_menu"]["title"], parse_mode="Markdown", reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count))
     
     await call.answer()
 
@@ -506,16 +612,20 @@ async def show_item(call: CallbackQuery) -> None:
     logger.info("Карточка товара: callback получен, item_id=%s, type=%s", item_id, item_type)
     async with AsyncSessionLocal() as db:
         item = (await db.execute(select(Item).where(Item.id == int(item_id)))).scalar_one_or_none()
-        # Проверим, куплен ли уже товар пользователем
         purchased = False
+        in_cart = False
         try:
             user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
             if user:
                 purchased = (await db.execute(
                     select(Purchase).where(Purchase.user_id == user.id, Purchase.item_id == int(item_id))
                 )).first() is not None
+                in_cart = (await db.execute(
+                    select(CartItem).where(CartItem.user_id == user.id, CartItem.item_id == int(item_id))
+                )).scalar_one_or_none() is not None
         except Exception:
             purchased = False
+            in_cart = False
         if not item:
             logger.error(f"Товар не найден: id={item_id}")
             await call.answer(f"Товар не найден: id={item_id}", show_alert=True)
@@ -556,23 +666,21 @@ async def show_item(call: CallbackQuery) -> None:
                             caption=caption,
                             parse_mode="Markdown"
                         ),
-                        reply_markup=item_card_kb(item.id, item_type, purchased, from_purchased=(call.message.caption and "Ваши купленные проекты:" in call.message.caption), page=page_from)
+                        reply_markup=item_card_kb(item.id, item_type, purchased, from_purchased=(call.message.caption and "Ваши купленные проекты:" in call.message.caption), page=page_from, in_cart=in_cart)
                     )
                     logger.info("Карточка показана (edit_media), id=%s", item.id)
                 else:
-                    # Если не удалось определить изображение — обновим только подпись
                     await call.message.edit_caption(
                         caption=caption,
                         parse_mode="Markdown",
-                        reply_markup=item_card_kb(item.id, item_type, purchased, from_purchased=(call.message.caption and "Ваши купленные проекты:" in call.message.caption), page=page_from)
+                        reply_markup=item_card_kb(item.id, item_type, purchased, from_purchased=(call.message.caption and "Ваши купленные проекты:" in call.message.caption), page=page_from, in_cart=in_cart)
                     )
                     logger.info("Карточка показана (edit_caption без изображения), id=%s", item.id)
             else:
-                # Был текст — используем edit_text
                 await call.message.edit_text(
                     text=caption,
                     parse_mode="Markdown",
-                    reply_markup=item_card_kb(item.id, item_type, purchased, from_purchased=False, page=page_from)
+                    reply_markup=item_card_kb(item.id, item_type, purchased, from_purchased=False, page=page_from, in_cart=in_cart)
                 )
                 logger.info("Карточка показана (edit_text), id=%s", item.id)
         except Exception as e:
@@ -592,7 +700,6 @@ async def list_items(message: Message, item_type: ItemType, section: str = None,
         )).scalars().all()
         purchased_ids: set[int] = set()
         try:
-            # Получим список купленных пользователем товаров по users.id
             tg = message.chat.id if message else (call.from_user.id if call else None)
             if tg:
                 user = (await db.execute(select(User).where(User.tg_id == tg))).scalar_one_or_none()
@@ -637,9 +744,10 @@ async def list_items(message: Message, item_type: ItemType, section: str = None,
                     )
                 except TelegramBadRequest as e:
                     if "message is not modified" in str(e):
-                        pass
+                        logger.debug("Сообщение не изменилось")
                     else:
-                        raise
+                        logger.error(f"Ошибка редактирования: {e}")
+                        await call.answer("Произошла ошибка", show_alert=True)
             else:
                 try:
                     await call.message.edit_text(
@@ -742,38 +850,6 @@ async def donate_custom_prompt(call: CallbackQuery, state: FSMContext) -> None:
     await call.answer()
 
 
-
-
-
-@router.callback_query(F.data == "donate:custom")
-async def donate_custom_prompt(call: CallbackQuery, state: FSMContext) -> None:
-    donate_image = load_texts().get("donate", {}).get("image")
-    image_exists = bool(donate_image and Path(donate_image).is_file())
-    try:
-        if call.message.photo:
-            if image_exists:
-                photo = FSInputFile(donate_image)
-                await call.message.edit_media(
-                    media=InputMediaPhoto(media=photo, caption="Введите сумму в рублях:"),
-                    reply_markup=back_kb("menu:donate")
-                )
-            else:
-                await call.message.edit_caption(caption="Введите сумму в рублях:", reply_markup=back_kb("menu:donate"))
-        else:
-            if image_exists:
-                photo = FSInputFile(donate_image)
-                await call.message.answer_photo(photo=photo, caption="Введите сумму в рублях:", reply_markup=back_kb("menu:donate"))
-                await call.message.delete()
-            else:
-                await call.message.edit_text("Введите сумму в рублях:", reply_markup=back_kb("menu:donate"))
-    except Exception:
-        await call.message.answer("Введите сумму в рублях:", reply_markup=back_kb("menu:donate"))
-        with contextlib.suppress(Exception):
-            await call.message.delete()
-    await state.set_state(DonateStates.waiting_for_amount)
-    await call.answer()
-
-
 @router.message(DonateStates.waiting_for_amount)
 async def donate_custom_amount(message: Message, state: FSMContext) -> None:
     text_val = (message.text or "").strip()
@@ -790,3 +866,542 @@ async def donate_custom_amount(message: Message, state: FSMContext) -> None:
         except Exception:
             await message.answer("Не удалось создать донат. Попробуйте позже.")
     await state.clear()
+
+
+# ========== КОРЗИНА ==========
+
+@router.callback_query(F.data == "menu:cart")
+async def show_cart(call: CallbackQuery) -> None:
+    texts = load_texts()
+    async with AsyncSessionLocal() as db:
+        user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
+        if not user:
+            await call.answer("Пользователь не найден", show_alert=True)
+            return
+        
+        cart_items_rows = (await db.execute(
+            select(CartItem).where(CartItem.user_id == user.id)
+        )).scalars().all()
+        
+        if not cart_items_rows:
+            await call.answer("Корзина пуста", show_alert=True)
+            return
+        
+        item_ids = [ci.item_id for ci in cart_items_rows]
+        items = (await db.execute(select(Item).where(Item.id.in_(item_ids)))).scalars().all()
+        
+        unavailable = []
+        available_items = []
+        for item in items:
+            if not item.is_visible:
+                unavailable.append(item.title)
+            else:
+                available_items.append(item)
+        
+        if unavailable:
+            msg = f"⚠️ Товары недоступны: {', '.join(unavailable)}"
+            await call.answer(msg, show_alert=True)
+        
+        total = sum(it.price_minor for it in available_items)
+        
+        caption = "🛒 *Корзина*\n\n"
+        for it in available_items:
+            caption += f"• {it.title} — `{it.price_minor/100:.2f}` ₽\n"
+        caption += f"\n*Итого:* `{total/100:.2f}` ₽"
+        
+        try:
+            if call.message.photo:
+                await call.message.edit_caption(
+                    caption=caption,
+                    parse_mode="Markdown",
+                    reply_markup=cart_kb(available_items, total)
+                )
+            else:
+                await call.message.edit_text(
+                    text=caption,
+                    parse_mode="Markdown",
+                    reply_markup=cart_kb(available_items, total)
+                )
+        except Exception:
+            await call.message.answer(caption, parse_mode="Markdown", reply_markup=cart_kb(available_items, total))
+            with contextlib.suppress(Exception):
+                await call.message.delete()
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("cart:add:"))
+async def add_to_cart(call: CallbackQuery) -> None:
+    _, _, item_id = call.data.split(":")
+    item_id_int = int(item_id)
+    
+    async with AsyncSessionLocal() as db:
+        user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
+        if not user:
+            await call.answer("Пользователь не найден", show_alert=True)
+            return
+        
+        item = (await db.execute(select(Item).where(Item.id == item_id_int))).scalar_one_or_none()
+        if not item:
+            await call.answer("Товар не найден", show_alert=True)
+            return
+        
+        purchased = (await db.execute(
+            select(Purchase).where(Purchase.user_id == user.id, Purchase.item_id == item_id_int)
+        )).first() is not None
+        
+        if purchased and item.item_type == ItemType.DIGITAL:
+            await call.answer("Вы уже купили этот товар", show_alert=True)
+            return
+        
+        existing = (await db.execute(
+            select(CartItem).where(CartItem.user_id == user.id, CartItem.item_id == item_id_int)
+        )).scalar_one_or_none()
+        
+        if existing:
+            await call.answer("Товар уже в корзине", show_alert=True)
+            return
+        
+        cart_item = CartItem(user_id=user.id, item_id=item_id_int)
+        db.add(cart_item)
+        await db.commit()
+    
+    await call.answer("✅ Добавлено в корзину", show_alert=True)
+    
+    try:
+        async with AsyncSessionLocal() as db:
+            item = (await db.execute(select(Item).where(Item.id == item_id_int))).scalar_one_or_none()
+            user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
+            in_cart = True
+            purchased = False
+            if user:
+                purchased = (await db.execute(
+                    select(Purchase).where(Purchase.user_id == user.id, Purchase.item_id == item_id_int)
+                )).first() is not None
+            
+            caption = (
+                f"*{item.title}*\n\n"
+                f"{item.description}\n\n"
+                f"💰 Цена: `{item.price_minor/100:.2f}` ₽"
+            )
+            await call.message.edit_caption(
+                caption=caption,
+                parse_mode="Markdown",
+                reply_markup=item_card_kb(item.id, item.item_type.value, purchased, from_purchased=False, page=1, in_cart=in_cart)
+            )
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("cart:remove:"))
+async def remove_from_cart(call: CallbackQuery) -> None:
+    _, _, item_id = call.data.split(":")
+    item_id_int = int(item_id)
+    
+    async with AsyncSessionLocal() as db:
+        user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
+        if not user:
+            await call.answer("Пользователь не найден", show_alert=True)
+            return
+        
+        await db.execute(
+            delete(CartItem).where(CartItem.user_id == user.id, CartItem.item_id == item_id_int)
+        )
+        await db.commit()
+    
+    await call.answer("❌ Удалено из корзины", show_alert=True)
+    
+    if call.message and call.message.caption and "Корзина" in call.message.caption:
+        await show_cart(call)
+    else:
+        try:
+            async with AsyncSessionLocal() as db:
+                item = (await db.execute(select(Item).where(Item.id == item_id_int))).scalar_one_or_none()
+                user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
+                in_cart = False
+                purchased = False
+                if user:
+                    purchased = (await db.execute(
+                        select(Purchase).where(Purchase.user_id == user.id, Purchase.item_id == item_id_int)
+                    )).first() is not None
+                
+                caption = (
+                    f"*{item.title}*\n\n"
+                    f"{item.description}\n\n"
+                    f"💰 Цена: `{item.price_minor/100:.2f}` ₽"
+                )
+                await call.message.edit_caption(
+                    caption=caption,
+                    parse_mode="Markdown",
+                    reply_markup=item_card_kb(item.id, item.item_type.value, purchased, from_purchased=False, page=1, in_cart=in_cart)  # <- ИСПРАВЛЕНО
+                )
+        except Exception:
+            pass
+
+
+@router.callback_query(F.data == "cart:clear")
+async def clear_cart(call: CallbackQuery) -> None:
+    async with AsyncSessionLocal() as db:
+        user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
+        if not user:
+            await call.answer("Пользователь не найден", show_alert=True)
+            return
+        
+        await db.execute(delete(CartItem).where(CartItem.user_id == user.id))
+        await db.commit()
+    
+    await call.answer("🗑 Корзина очищена", show_alert=True)
+    
+    texts = load_texts()
+    try:
+        if "image" in texts["main_menu"]:
+            photo = FSInputFile(texts["main_menu"]["image"])
+            await call.message.edit_media(
+                media=InputMediaPhoto(media=photo, caption=texts["main_menu"]["title"], parse_mode="Markdown"),
+                reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=0)
+            )
+        else:
+            await call.message.edit_text(
+                texts["main_menu"]["title"],
+                parse_mode="Markdown",
+                reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=0)
+            )
+    except Exception:
+        await call.message.answer(
+            texts["main_menu"]["title"],
+            parse_mode="Markdown",
+            reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=0)
+        )
+
+
+@router.callback_query(F.data == "cart:checkout")
+async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
+    async with AsyncSessionLocal() as db:
+        user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
+        if not user:
+            await call.answer("Пользователь не найден", show_alert=True)
+            return
+        
+        cart_items_rows = (await db.execute(
+            select(CartItem).where(CartItem.user_id == user.id)
+        )).scalars().all()
+        
+        if not cart_items_rows:
+            await call.answer("Корзина пуста", show_alert=True)
+            return
+        
+        item_ids = [ci.item_id for ci in cart_items_rows]
+        items = (await db.execute(select(Item).where(Item.id.in_(item_ids), Item.is_visible == True))).scalars().all()
+        
+        if not items:
+            await call.answer("Нет доступных товаров для оплаты", show_alert=True)
+            return
+        
+        for item in items:
+            if item.item_type == ItemType.DIGITAL and item.delivery_type == 'codes':
+                available_codes = (await db.execute(
+                    select(func.count()).select_from(ItemCode).where(
+                        ItemCode.item_id == item.id,
+                        ItemCode.is_sold == False
+                    )
+                )).scalar_one()
+                
+                if available_codes < 1:
+                    await call.answer(f"❌ Товар '{item.title}' закончился", show_alert=True)
+                    return
+        
+        if await has_offline_items(items):
+            await state.update_data(
+                cart_items=item_ids,
+                total_amount=sum(it.price_minor for it in items)
+            )
+            
+            texts = load_texts()
+            prompt = texts.get("offline_delivery", {}).get("prompts", {}).get(
+                "fullname", 
+                "📝 Введите ваше ФИО для доставки:"
+            )
+            
+            try:
+                if call.message.photo:
+                    await call.message.edit_caption(
+                        caption=prompt,
+                        reply_markup=back_kb("menu:cart")
+                    )
+                else:
+                    await call.message.edit_text(
+                        text=prompt,
+                        reply_markup=back_kb("menu:cart")
+                    )
+            except Exception:
+                await call.message.answer(prompt, reply_markup=back_kb("menu:cart"))
+            
+            await state.set_state(OfflineDeliveryStates.waiting_for_fullname)
+            await call.answer()
+            return
+        
+        total_amount = sum(it.price_minor for it in items)
+        
+        order = Order(
+            user_id=user.id,
+            item_id=None,
+            amount_minor=total_amount,
+            currency="RUB",
+            payment_method=PaymentMethod.CARD_RF,
+            status=OrderStatus.CREATED,
+            buyer_tg_id=str(call.from_user.id),
+        )
+        db.add(order)
+        await db.flush()
+        
+        client = YooKassaClient()
+        try:
+            import uuid
+            idem = str(uuid.uuid4())
+            templates = load_texts().get("payment", {}).get("description_templates", {})
+            description = (templates.get("cart") or "Оплата корзины | Заказ {order_id}").format(order_id=order.id)
+            
+            resp = await client.create_payment(
+                amount_minor=total_amount,
+                description=description,
+                payment_id=f"cart:{order.id}",
+                payment_method_type=None,
+                metadata={"cart_order_id": str(order.id), "item_ids": ",".join(str(i.id) for i in items)},
+                customer_email=f"{call.from_user.id}@{settings.email_domain}",
+                idempotence_key=idem,
+            )
+            url = (resp or {}).get("confirmation", {}).get("confirmation_url")
+            if not url:
+                await call.message.answer("Не удалось создать заказ. Попробуйте позже.")
+                return
+            
+            order.fk_order_id = resp.get("id")
+            order.fk_payment_url = url
+            order.status = OrderStatus.PENDING
+            
+            for item in items:
+                purchase = Purchase(
+                    order_id=order.id,
+                    user_id=user.id,
+                    item_id=item.id,
+                    delivery_info=None
+                )
+                db.add(purchase)
+            
+            await db.commit()
+            
+            await db.execute(delete(CartItem).where(CartItem.user_id == user.id))
+            await db.commit()
+            
+            try:
+                if call.message.photo:
+                    await call.message.edit_caption(
+                        caption="Перейдите к оплате:",
+                        reply_markup=payment_link_kb(url)
+                    )
+                else:
+                    await call.message.edit_text(
+                        "Перейдите к оплате:",
+                        reply_markup=payment_link_kb(url)
+                    )
+            except Exception:
+                await call.message.answer("Ссылка на оплату:", reply_markup=payment_link_kb(url))
+        except Exception as e:
+            logger.error(f"Error creating cart order: {e}")
+            await call.message.answer("Не удалось создать заказ. Попробуйте позже.")
+        finally:
+            await client.close()
+    
+    await call.answer()
+
+
+
+@router.message(OfflineDeliveryStates.waiting_for_fullname)
+async def offline_capture_fullname(message: Message, state: FSMContext) -> None:
+    fullname = (message.text or "").strip()
+    
+    if not fullname or len(fullname) < 2:
+        await message.answer("❌ Пожалуйста, введите корректное ФИО")
+        return
+    
+    await state.update_data(delivery_fullname=fullname)
+    
+    texts = load_texts()
+    prompt = texts.get("offline_delivery", {}).get("prompts", {}).get(
+        "phone",
+        "📞 Введите номер телефона для связи:"
+    )
+    
+    await message.answer(prompt, reply_markup=back_kb("menu:cart"))
+    await state.set_state(OfflineDeliveryStates.waiting_for_phone)
+
+
+@router.message(OfflineDeliveryStates.waiting_for_phone)
+async def offline_capture_phone(message: Message, state: FSMContext) -> None:
+    phone = (message.text or "").strip()
+    
+    phone_digits = ''.join(filter(str.isdigit, phone))
+    if len(phone_digits) < 10:
+        await message.answer("❌ Пожалуйста, введите корректный номер телефона (минимум 10 цифр)")
+        return
+    
+    await state.update_data(delivery_phone=phone)
+    
+    texts = load_texts()
+    prompt = texts.get("offline_delivery", {}).get("prompts", {}).get(
+        "address",
+        "📍 Введите адрес доставки:"
+    )
+    
+    await message.answer(prompt, reply_markup=back_kb("menu:cart"))
+    await state.set_state(OfflineDeliveryStates.waiting_for_address)
+
+
+@router.message(OfflineDeliveryStates.waiting_for_address)
+async def offline_capture_address(message: Message, state: FSMContext) -> None:
+    address = (message.text or "").strip()
+    
+    if not address or len(address) < 5:
+        await message.answer("❌ Пожалуйста, введите корректный адрес")
+        return
+    
+    await state.update_data(delivery_address=address)
+    
+    texts = load_texts()
+    prompt = texts.get("offline_delivery", {}).get("prompts", {}).get(
+        "comment",
+        "💬 Добавьте комментарий к заказу (или пропустите):"
+    )
+    
+    await message.answer(prompt, reply_markup=skip_kb("offline:skip_comment"))
+    await state.set_state(OfflineDeliveryStates.waiting_for_comment)
+
+
+@router.message(OfflineDeliveryStates.waiting_for_comment)
+async def offline_capture_comment(message: Message, state: FSMContext) -> None:
+    comment = (message.text or "").strip()
+    await state.update_data(delivery_comment=comment)
+    await finalize_offline_order(message, state)
+
+
+@router.callback_query(F.data == "offline:skip_comment")
+async def offline_skip_comment(call: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(delivery_comment=None)
+    await finalize_offline_order(call.message, state, call=call)
+
+
+async def finalize_offline_order(message: Message, state: FSMContext, call: CallbackQuery = None) -> None:
+    """Финализация оффлайн заказа с созданием платежа"""
+    data = await state.get_data()
+    
+    async with AsyncSessionLocal() as db:
+        user = (await db.execute(select(User).where(User.tg_id == message.chat.id))).scalar_one_or_none()
+        if not user:
+            await message.answer("❌ Ошибка: пользователь не найден")
+            await state.clear()
+            return
+        
+        item_ids = data.get('cart_items', [])
+        items = (await db.execute(select(Item).where(Item.id.in_(item_ids)))).scalars().all()
+        
+        if not items:
+            await message.answer("❌ Ошибка: товары не найдены")
+            await state.clear()
+            return
+        
+        total_amount = data.get('total_amount', sum(it.price_minor for it in items))
+        
+        order = Order(
+            user_id=user.id,
+            item_id=None,
+            amount_minor=total_amount,
+            currency="RUB",
+            payment_method=PaymentMethod.CARD_RF,
+            status=OrderStatus.CREATED,
+            buyer_tg_id=str(message.chat.id),
+        )
+        db.add(order)
+        await db.flush()
+        
+        client = YooKassaClient()
+        try:
+            import uuid
+            idem = str(uuid.uuid4())
+            templates = load_texts().get("payment", {}).get("description_templates", {})
+            description = (templates.get("offline") or "Оффлайн заказ #{order_id}").format(order_id=order.id)
+            
+            resp = await client.create_payment(
+                amount_minor=total_amount,
+                description=description,
+                payment_id=f"offline:{order.id}",
+                payment_method_type=None,
+                metadata={
+                    "offline_order_id": str(order.id),
+                    "item_ids": ",".join(str(i.id) for i in items),
+                    "has_delivery": "true"
+                },
+                customer_email=f"{message.chat.id}@{settings.email_domain}",
+                idempotence_key=idem,
+            )
+            
+            url = (resp or {}).get("confirmation", {}).get("confirmation_url")
+            if not url:
+                await message.answer("❌ Не удалось создать заказ. Попробуйте позже.")
+                return
+            
+            order.fk_order_id = resp.get("id")
+            order.fk_payment_url = url
+            order.status = OrderStatus.PENDING
+            
+            for item in items:
+                purchase = Purchase(
+                    order_id=order.id,
+                    user_id=user.id,
+                    item_id=item.id,
+                    delivery_info=f"Заказ #{order.id}",
+                    delivery_fullname=data.get('delivery_fullname'),
+                    delivery_phone=data.get('delivery_phone'),
+                    delivery_address=data.get('delivery_address'),
+                    delivery_comment=data.get('delivery_comment')
+                )
+                db.add(purchase)
+            
+            await db.commit()
+            
+            await db.execute(delete(CartItem).where(CartItem.user_id == user.id))
+            await db.commit()
+            
+            await send_offline_order_to_admin(
+                order_id=order.id,
+                items=items,
+                delivery_data={
+                    'fullname': data.get('delivery_fullname'),
+                    'phone': data.get('delivery_phone'),
+                    'address': data.get('delivery_address'),
+                    'comment': data.get('delivery_comment')
+                },
+                bot=message.bot
+            )
+            
+            success_text = (
+                "✅ *Заказ успешно оформлен!*\n\n"
+                f"📦 Номер заказа: `#{order.id}`\n"
+                f"💰 Сумма: `{total_amount/100:.2f}` ₽\n\n"
+                "Администратор свяжется с вами для уточнения деталей доставки."
+            )
+            
+            await message.answer(
+                success_text,
+                parse_mode="Markdown",
+                reply_markup=payment_link_kb(url)
+            )
+            
+        except Exception as e:
+            logger.error(f"Error finalizing offline order: {e}")
+            await message.answer("❌ Не удалось создать заказ. Попробуйте позже.")
+        finally:
+            await client.close()
+    
+    await state.clear()
+    
+    if call:
+        await call.answer()
