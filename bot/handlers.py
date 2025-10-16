@@ -415,6 +415,7 @@ async def cb_back(call: CallbackQuery) -> None:
             await list_items(call.message, item_type_enum, section=section_mapping[item_type], call=call, page=page)
             await call.answer()
             return
+    
     if action == "purchased":
         async with AsyncSessionLocal() as db:
             user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
@@ -459,38 +460,9 @@ async def cb_back(call: CallbackQuery) -> None:
                 with contextlib.suppress(Exception):
                     await call.message.delete()
             await call.answer()
-            return
+        return
     
-    try:
-        if "image" in texts["main_menu"]:
-            photo = FSInputFile(texts["main_menu"]["image"])
-            await call.message.edit_media(
-                media=InputMediaPhoto(
-                    media=photo,
-                    caption=texts["main_menu"]["title"],
-                    parse_mode="Markdown"
-                ),
-                reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username))
-            )
-        else:
-            await call.message.edit_text(texts["main_menu"]["title"], parse_mode="Markdown", reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username)))
-    except FileNotFoundError:
-        await call.message.edit_text(texts["main_menu"]["title"], parse_mode="Markdown", reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username)))
-        try:
-            if "image" in texts["main_menu"]:
-                photo = FSInputFile(texts["main_menu"]["image"])
-                await call.message.answer_photo(
-                    photo=photo,
-                    caption=texts["main_menu"]["title"],
-                    parse_mode="Markdown",
-                    reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username))
-                )
-                await call.message.delete()
-            else:
-                await call.message.edit_text(texts["main_menu"]["title"], parse_mode="Markdown", reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username)))
-        except FileNotFoundError:
-            await call.message.edit_text(texts["main_menu"]["title"], parse_mode="Markdown", reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username)))
-    
+    # Возврат в главное меню - получаем счетчик корзины один раз
     async with AsyncSessionLocal() as db:
         user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
         cart_count = 0
@@ -498,7 +470,7 @@ async def cb_back(call: CallbackQuery) -> None:
             cart_count = (await db.execute(
                 select(func.count()).select_from(CartItem).where(CartItem.user_id == user.id)
             )).scalar_one()
-    await call.answer()
+    
     try:
         if "image" in texts["main_menu"]:
             photo = FSInputFile(texts["main_menu"]["image"])
@@ -511,23 +483,20 @@ async def cb_back(call: CallbackQuery) -> None:
                 reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count)
             )
         else:
-            await call.message.edit_text(texts["main_menu"]["title"], parse_mode="Markdown", reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count))
-    except FileNotFoundError:
-        await call.message.edit_text(texts["main_menu"]["title"], parse_mode="Markdown", reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count))
-        try:
-            if "image" in texts["main_menu"]:
-                photo = FSInputFile(texts["main_menu"]["image"])
-                await call.message.answer_photo(
-                    photo=photo,
-                    caption=texts["main_menu"]["title"],
-                    parse_mode="Markdown",
-                    reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count)
-                )
-                await call.message.delete()
-            else:
-                await call.message.edit_text(texts["main_menu"]["title"], parse_mode="Markdown", reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count))
-        except FileNotFoundError:
-            await call.message.edit_text(texts["main_menu"]["title"], parse_mode="Markdown", reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count))
+            await call.message.edit_text(
+                texts["main_menu"]["title"], 
+                parse_mode="Markdown", 
+                reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count)
+            )
+    except Exception:
+        # Fallback: создаем новое сообщение
+        await call.message.answer(
+            texts["main_menu"]["title"], 
+            parse_mode="Markdown", 
+            reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count)
+        )
+        with contextlib.suppress(Exception):
+            await call.message.delete()
     
     await call.answer()
 
@@ -1032,7 +1001,7 @@ async def remove_from_cart(call: CallbackQuery) -> None:
                 await call.message.edit_caption(
                     caption=caption,
                     parse_mode="Markdown",
-                    reply_markup=item_card_kb(item.id, item.item_type.value, purchased, from_purchased=False, page=1, in_cart=in_cart)  # <- ИСПРАВЛЕНО
+                    reply_markup=item_card_kb(item.id, item.item_type.value, purchased, from_purchased=False, page=1, in_cart=in_cart)
                 )
         except Exception:
             pass
@@ -1096,6 +1065,7 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
             await call.answer("Нет доступных товаров для оплаты", show_alert=True)
             return
         
+        # Проверка наличия кодов для цифровых товаров
         for item in items:
             if item.item_type == ItemType.DIGITAL and item.delivery_type == 'codes':
                 available_codes = (await db.execute(
@@ -1109,6 +1079,7 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
                     await call.answer(f"❌ Товар '{item.title}' закончился", show_alert=True)
                     return
         
+        # Если есть физические товары, запрашиваем данные доставки
         if await has_offline_items(items):
             await state.update_data(
                 cart_items=item_ids,
@@ -1139,6 +1110,7 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
             await call.answer()
             return
         
+        # Создание заказа для цифровых товаров/услуг
         total_amount = sum(it.price_minor for it in items)
         
         order = Order(
@@ -1171,6 +1143,8 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
             )
             url = (resp or {}).get("confirmation", {}).get("confirmation_url")
             if not url:
+                # Откат транзакции при ошибке
+                await db.rollback()
                 await call.message.answer("Не удалось создать заказ. Попробуйте позже.")
                 return
             
@@ -1189,6 +1163,7 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
             
             await db.commit()
             
+            # Очищаем корзину после успешного создания заказа
             await db.execute(delete(CartItem).where(CartItem.user_id == user.id))
             await db.commit()
             
@@ -1206,13 +1181,14 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
             except Exception:
                 await call.message.answer("Ссылка на оплату:", reply_markup=payment_link_kb(url))
         except Exception as e:
+            # Откат транзакции при любой ошибке
+            await db.rollback()
             logger.error(f"Error creating cart order: {e}")
             await call.message.answer("Не удалось создать заказ. Попробуйте позже.")
         finally:
             await client.close()
     
     await call.answer()
-
 
 
 @router.message(OfflineDeliveryStates.waiting_for_fullname)
@@ -1260,8 +1236,21 @@ async def offline_capture_phone(message: Message, state: FSMContext) -> None:
 async def offline_capture_address(message: Message, state: FSMContext) -> None:
     address = (message.text or "").strip()
     
-    if not address or len(address) < 5:
-        await message.answer("❌ Пожалуйста, введите корректный адрес")
+    # Улучшенная валидация
+    if not address or len(address) < 10:
+        await message.answer("❌ Пожалуйста, введите полный адрес (минимум 10 символов)")
+        return
+    
+    # Проверка наличия ключевых элементов адреса
+    address_lower = address.lower()
+    has_street = any(keyword in address_lower for keyword in ['ул', 'улица', 'пр', 'проспект', 'пер', 'переулок', 'бульвар', 'б-р', 'наб', 'набережная', 'просп', 'шоссе', 'ш.'])
+    has_building = any(keyword in address_lower for keyword in ['д.', 'д ', 'дом'])
+    
+    if not has_street or not has_building:
+        await message.answer(
+            "❌ Пожалуйста, укажите полный адрес с улицей и номером дома\n"
+            "Например: ул. Ленина, д. 10, кв. 5"
+        )
         return
     
     await state.update_data(delivery_address=address)
@@ -1345,6 +1334,8 @@ async def finalize_offline_order(message: Message, state: FSMContext, call: Call
             
             url = (resp or {}).get("confirmation", {}).get("confirmation_url")
             if not url:
+                # Откат транзакции при ошибке
+                await db.rollback()
                 await message.answer("❌ Не удалось создать заказ. Попробуйте позже.")
                 return
             
@@ -1367,9 +1358,11 @@ async def finalize_offline_order(message: Message, state: FSMContext, call: Call
             
             await db.commit()
             
+            # Очищаем корзину после успешного создания заказа
             await db.execute(delete(CartItem).where(CartItem.user_id == user.id))
             await db.commit()
             
+            # Отправляем уведомление администратору
             await send_offline_order_to_admin(
                 order_id=order.id,
                 items=items,
@@ -1396,6 +1389,8 @@ async def finalize_offline_order(message: Message, state: FSMContext, call: Call
             )
             
         except Exception as e:
+            # Откат транзакции при любой ошибке
+            await db.rollback()
             logger.error(f"Error finalizing offline order: {e}")
             await message.answer("❌ Не удалось создать заказ. Попробуйте позже.")
         finally:

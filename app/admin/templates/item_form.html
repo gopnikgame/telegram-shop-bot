@@ -8,9 +8,9 @@
       <label>Тип товара *</label>
       <select name="item_type" id="itemType" required onchange="updateFormFields()">
         {% for t in ItemType %}
-        {% if t.value == 'service' or t.value == 'digital' %}
+        {% if t.value in ['service', 'digital', 'offline'] %}
         <option value="{{ t.value }}" {% if item and item.item_type==t %}selected{% endif %}>
-          {{ {'service': 'Услуга', 'digital': 'Цифровой товар'}[t.value] }}
+          {{ {'service': 'Услуга', 'digital': 'Цифровой товар', 'offline': 'Физический товар'}[t.value] }}
         </option>
         {% endif %}
         {% endfor %}
@@ -86,8 +86,37 @@
       </div>
     </div>
 
-    <!-- Поля для модулей удалены -->
+    <!-- Поля для физических товаров -->
+    <div id="offlineFields" style="display:none;" class="grid">
+      <div>
+        <label>Количество на складе</label>
+        <input name="stock_quantity" type="number" min="0" step="1"
+               value="{{ item.stock if item and item.stock else 0 }}" 
+               placeholder="0 = неограниченно" />
+        <div style="color:#9aa4b2; font-size:12px; margin-top:4px;">
+          Оставьте 0 для товаров без учета остатков
+        </div>
+      </div>
+      <div>
+        <label>Вес (кг)</label>
+        <input name="weight" type="number" step="0.01" min="0"
+               value="{{ item.weight if item and item.weight else '' }}" 
+               placeholder="Опционально" />
+        <div style="color:#9aa4b2; font-size:12px; margin-top:4px;">
+          Для расчета стоимости доставки
+        </div>
+      </div>
+      <div>
+        <label>Габариты (ДxШxВ см)</label>
+        <input name="dimensions" type="text"
+               value="{{ item.dimensions if item and item.dimensions else '' }}" 
+               placeholder="30x20x10" />
+        <div style="color:#9aa4b2; font-size:12px; margin-top:4px;">
+          Опционально, для расчета доставки
+        </div>
+      </div>
     </div>
+
     <div class="row" style="justify-content:flex-end;">
       <button type="submit" class="btn btn-primary">Сохранить</button>
     </div>
@@ -112,8 +141,11 @@ function updateFormFields() {
   // Скрываем все специфичные поля
   const serviceEl = document.getElementById('serviceFields');
   const digitalEl = document.getElementById('digitalFields');
+  const offlineEl = document.getElementById('offlineFields');
+  
   serviceEl.style.display = 'none'; setEnabled(serviceEl, false);
   digitalEl.style.display = 'none'; setEnabled(digitalEl, false);
+  offlineEl.style.display = 'none'; setEnabled(offlineEl, false);
   
   // Показываем поля в зависимости от типа
   if (itemType === 'service') {
@@ -121,6 +153,8 @@ function updateFormFields() {
   } else if (itemType === 'digital') {
     digitalEl.style.display = 'grid'; setEnabled(digitalEl, true);
     updateDeliveryFields();
+  } else if (itemType === 'offline') {
+    offlineEl.style.display = 'grid'; setEnabled(offlineEl, true);
   }
 }
 

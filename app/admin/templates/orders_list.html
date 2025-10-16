@@ -20,6 +20,7 @@
         <th>Сумма</th>
         <th>Статус</th>
         <th>Покупатель TG</th>
+        <th>Доставка</th>
         <th style="text-align:right;">Действия</th>
       </tr>
     </thead>
@@ -27,10 +28,17 @@
       {% for o in orders %}
       <tr>
         <td>{{ o.id }}</td>
-        <td>{{ o.item_id }}</td>
+        <td>{{ o.item_id or 'Корзина' }}</td>
         <td>{{ '%.2f' % (o.amount_minor/100) }} ₽</td>
         <td>{{ o.status.value if o.status else o.status }}</td>
         <td>{{ o.buyer_tg_id or '' }}</td>
+        <td>
+          {% if o.has_delivery_info %}
+            <button type="button" class="btn btn-icon" onclick="showDeliveryInfo({{ o.id }})" title="Посмотреть данные">📦</button>
+          {% else %}
+            —
+          {% endif %}
+        </td>
         <td style="text-align:right;">
           <form method="post" action="/admin/orders/{{ o.id }}/delete" style="display:inline;">
             <button type="submit" class="btn btn-danger btn-icon" title="Удалить" onclick="return confirm('Удалить заказ #{{ o.id }}?');">🗑️</button>
@@ -54,4 +62,57 @@
     </div>
   </div>
 </div>
+
+<!-- Модалка с данными доставки -->
+<div id="deliveryModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); align-items:center; justify-content:center; z-index:1000;">
+  <div style="background:#111827; border:1px solid #1f2937; padding:20px; border-radius:12px; width:520px; box-shadow:0 10px 30px rgba(0,0,0,0.4);">
+    <h3>Данные доставки для заказа #<span id="deliveryOrderId"></span></h3>
+    <div id="deliveryContent" style="margin-top:16px; color:#d1d5db; line-height:1.8;"></div>
+    <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
+      <button class="btn btn-primary" onclick="closeDeliveryModal()">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<script>
+async function showDeliveryInfo(orderId) {
+  document.getElementById('deliveryOrderId').textContent = orderId;
+  const content = document.getElementById('deliveryContent');
+  content.innerHTML = 'Загрузка...';
+  document.getElementById('deliveryModal').style.display = 'flex';
+  
+  try {
+    const resp = await fetch(`/admin/orders/${orderId}/delivery`);
+    const data = await resp.json();
+    
+    if (data.ok) {
+      let html = '<div style="display:grid; gap:12px;">';
+      
+      if (data.delivery.fullname) {
+        html += `<div><strong>👤 ФИО:</strong> ${data.delivery.fullname}</div>`;
+      }
+      if (data.delivery.phone) {
+        html += `<div><strong>📞 Телефон:</strong> ${data.delivery.phone}</div>`;
+      }
+      if (data.delivery.address) {
+        html += `<div><strong>📍 Адрес:</strong> ${data.delivery.address}</div>`;
+      }
+      if (data.delivery.comment) {
+        html += `<div><strong>💬 Комментарий:</strong> ${data.delivery.comment}</div>`;
+      }
+      
+      html += '</div>';
+      content.innerHTML = html;
+    } else {
+      content.innerHTML = '❌ Ошибка загрузки данных';
+    }
+  } catch (e) {
+    content.innerHTML = '❌ Ошибка сети';
+  }
+}
+
+function closeDeliveryModal() {
+  document.getElementById('deliveryModal').style.display = 'none';
+}
+</script>
 {% endblock %}

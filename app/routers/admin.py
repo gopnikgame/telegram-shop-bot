@@ -54,6 +54,7 @@ async def admin_index(request: Request, db: AsyncSession = Depends(get_db_sessio
     stats = {
         "users": (await db.execute(select(func.count()).select_from(User))).scalar_one(),
         "items": (await db.execute(select(func.count()).select_from(Item))).scalar_one(),
+        # Учитываем все оплаченные заказы (включая корзину)
         "paid_orders": (await db.execute(select(func.count()).select_from(Order).where(Order.status == 'paid'))).scalar_one(),
         "revenue": (await db.execute(select(func.coalesce(func.sum(Order.amount_minor), 0)).where(Order.status == 'paid'))).scalar_one(),
     }
@@ -249,9 +250,10 @@ async def items_create(
     delivery_type: Optional[str] = Form(None),
     digital_file: Optional[UploadFile] = File(None),
     github_repo_read_grant: Optional[str] = Form(None),
-    # Поля для модулей
-    module_name: Optional[str] = Form(None),
-    module_file: Optional[UploadFile] = File(None),
+    # Поля для физических товаров
+    stock_quantity: Optional[int] = Form(None),
+    weight: Optional[float] = Form(None),
+    dimensions: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db_session),
     _: None = Depends(ensure_auth),
 ):
@@ -276,7 +278,6 @@ async def items_create(
         digital_file_path = str(upload_dir / digital_file.filename)
         with open(digital_file_path, "wb") as f:
             f.write(await digital_file.read())
-    # поля для модулей удалены
             
     # Создаем новый товар
     # Подставим дефолтную картинку, если не загружена
@@ -286,6 +287,8 @@ async def items_create(
             image_file_id = defaults.get("service")
         elif item_type == ItemType.DIGITAL:
             image_file_id = defaults.get("digital")
+        elif item_type == ItemType.OFFLINE:
+            image_file_id = defaults.get("offline")
 
     item = Item(
         title=title,
@@ -297,7 +300,6 @@ async def items_create(
 
     # Добавляем специфичные поля в зависимости от типа товара
     if item_type == ItemType.SERVICE:
-        # Обновляем только если поле передано (позволяет менять цену без выбора заново)
         if pricing_type is not None:
             item.pricing_type = pricing_type
         item.service_admin_contact = settings.admin_username  # Берем из env
@@ -309,7 +311,17 @@ async def items_create(
         else:  # github
             item.github_repo_read_grant = github_repo_read_grant
     
-    
+    elif item_type == ItemType.OFFLINE:
+        # Обработка полей физических товаров
+        item.stock = stock_quantity if stock_quantity else 0
+        # Сохраняем информацию о весе и габаритах в поле shipping_info_text
+        shipping_parts = []
+        if weight and weight > 0:
+            shipping_parts.append(f"Вес: {weight} кг")
+        if dimensions and dimensions.strip():
+            shipping_parts.append(f"Габариты: {dimensions.strip()}")
+        if shipping_parts:
+            item.shipping_info_text = " | ".join(shipping_parts)
 
     db.add(item)
     await db.commit()
@@ -322,6 +334,25 @@ async def items_edit(request: Request, item_id: int, db: AsyncSession = Depends(
     item = (await db.execute(select(Item).where(Item.id == item_id))).scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="item not found")
+    
+    # Извлекаем вес и габариты из shipping_info_text для редактирования
+    weight_value = None
+    dimensions_value = None
+    if item.item_type == ItemType.OFFLINE and item.shipping_info_text:
+        parts = item.shipping_info_text.split(" | ")
+        for part in parts:
+            if part.startswith("Вес: "):
+                try:
+                    weight_value = float(part.replace("Вес: ", "").replace(" кг", "").strip())
+                except ValueError:
+                    pass
+            elif part.startswith("Габариты: "):
+                dimensions_value = part.replace("Габариты: ", "").strip()
+    
+    # Добавляем временные атрибуты для шаблона
+    item.weight = weight_value
+    item.dimensions = dimensions_value
+    
     return templates.TemplateResponse("item_form.html", {"request": request, "item": item, "ItemType": ItemType})
 
 
@@ -342,9 +373,10 @@ async def items_update(
     digital_file: Optional[UploadFile] = File(None),
     github_repo_read_grant: Optional[str] = Form(None),
     codes_file: Optional[UploadFile] = File(None),
-    # Поля для модулей
-    module_name: Optional[str] = Form(None),
-    module_file: Optional[UploadFile] = File(None),
+    # Поля для физических товаров
+    stock_quantity: Optional[int] = Form(None),
+    weight: Optional[float] = Form(None),
+    dimensions: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db_session),
     _: None = Depends(ensure_auth),
 ):
@@ -381,7 +413,6 @@ async def items_update(
                 db.add(ItemCode(item_id=item.id, code=c))
         except Exception:
             pass
-    # загрузка модулей удалена
 
     # Если картинка отсутствует и не была обновлена — поставим дефолт
     if not item.image_file_id:
@@ -390,6 +421,8 @@ async def items_update(
             item.image_file_id = defaults.get("service")
         elif item_type == ItemType.DIGITAL:
             item.image_file_id = defaults.get("digital")
+        elif item_type == ItemType.OFFLINE:
+            item.image_file_id = defaults.get("offline")
 
     # Обновляем общие поля товара
     item.title = title
@@ -413,7 +446,19 @@ async def items_update(
             if github_repo_read_grant is not None:
                 item.github_repo_read_grant = github_repo_read_grant
     
-    
+    elif item_type == ItemType.OFFLINE:
+        # Обработка полей физических товаров
+        item.stock = stock_quantity if stock_quantity else 0
+        # Сохраняем информацию о весе и габаритах в поле shipping_info_text
+        shipping_parts = []
+        if weight and weight > 0:
+            shipping_parts.append(f"Вес: {weight} кг")
+        if dimensions and dimensions.strip():
+            shipping_parts.append(f"Габариты: {dimensions.strip()}")
+        if shipping_parts:
+            item.shipping_info_text = " | ".join(shipping_parts)
+        else:
+            item.shipping_info_text = None
 
     await db.commit()
     return RedirectResponse(url="/admin/items", status_code=303)
@@ -441,7 +486,8 @@ async def add_codes(item_id: int, file: UploadFile = File(...), db: AsyncSession
 @router.get("/orders")
 async def orders_list(request: Request, db: AsyncSession = Depends(get_db_session), _: None = Depends(ensure_auth), page: int = 1, q: str | None = None):
     page_size = 10
-    stmt = select(Order).where(Order.item_id.is_not(None))
+    # Убираем фильтр item_id.is_not(None), чтобы показывать корзинные заказы
+    stmt = select(Order)
     if q:
         try:
             stmt = stmt.where(Order.buyer_tg_id == str(int(q)))
@@ -449,7 +495,39 @@ async def orders_list(request: Request, db: AsyncSession = Depends(get_db_sessio
             stmt = stmt.where(Order.buyer_tg_id == "__no__match__")
     total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
     orders = (await db.execute(stmt.order_by(Order.id.desc()).offset((page-1)*page_size).limit(page_size))).scalars().all()
+    
+    # Проверяем наличие данных доставки для каждого заказа
+    for order in orders:
+        purchase_with_delivery = (await db.execute(
+            select(Purchase).where(
+                Purchase.order_id == order.id,
+                Purchase.delivery_fullname.is_not(None)
+            ).limit(1)
+        )).scalar_one_or_none()
+        order.has_delivery_info = purchase_with_delivery is not None
+    
     return templates.TemplateResponse("orders_list.html", {"request": request, "orders": orders, "page": page, "page_size": page_size, "total": total, "query": q})
+
+
+@router.get("/orders/{order_id}/delivery")
+async def get_order_delivery(order_id: int, db: AsyncSession = Depends(get_db_session), _: None = Depends(ensure_auth)):
+    """Получить данные доставки для заказа"""
+    purchase = (await db.execute(
+        select(Purchase).where(Purchase.order_id == order_id).limit(1)
+    )).scalar_one_or_none()
+    
+    if not purchase:
+        return JSONResponse({"ok": False, "error": "Заказ не найден"}, status_code=404)
+    
+    return JSONResponse({
+        "ok": True,
+        "delivery": {
+            "fullname": purchase.delivery_fullname,
+            "phone": purchase.delivery_phone,
+            "address": purchase.delivery_address,
+            "comment": purchase.delivery_comment
+        }
+    })
 
 
 @router.post("/orders/{order_id}/delete")

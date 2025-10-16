@@ -36,6 +36,8 @@
         <td>
           {% if i.item_type.value == 'digital' %}
             {{ i.codes_left if i.codes_left is defined else '-' }}
+          {% elif i.item_type.value == 'offline' %}
+            {{ i.stock if i.stock else '∞' }}
           {% else %}
             —
           {% endif %}
@@ -55,6 +57,9 @@
             </form>
             {% if i.item_type.value == 'digital' %}
               <button class="btn btn-icon" title="Догрузить TXT" onclick="openCodesModal({{ i.id }})">➕TXT</button>
+            {% endif %}
+            {% if i.item_type.value == 'offline' %}
+              <button class="btn btn-icon" title="Информация о доставке" onclick="showShippingInfo('{{ i.shipping_info_text or '' }}')">📦</button>
             {% endif %}
           </div>
         </td>
@@ -91,6 +96,17 @@
   </div>
   <input type="hidden" id="codesItemId" />
   
+</div>
+
+<!-- Модалка информации о доставке -->
+<div id="shippingModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); align-items:center; justify-content:center; z-index:1000;">
+  <div style="background:#111827; border:1px solid #1f2937; padding:20px; border-radius:12px; width:420px; box-shadow:0 10px 30px rgba(0,0,0,0.4);">
+    <h3>📦 Информация о доставке</h3>
+    <div id="shippingContent" style="margin-top:12px; color:#d1d5db; line-height:1.8;"></div>
+    <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
+      <button class="btn btn-primary" onclick="closeShippingModal()">Закрыть</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -131,6 +147,20 @@
       msg.textContent = 'Ошибка сети.';
       msg.style.color = '#fca5a5';
     }
+  }
+  
+  function showShippingInfo(info) {
+    const content = document.getElementById('shippingContent');
+    if (!info) {
+      content.innerHTML = '<div style="color:#9aa4b2;">Информация о доставке не указана</div>';
+    } else {
+      content.innerHTML = info.replace(' | ', '<br>');
+    }
+    document.getElementById('shippingModal').style.display = 'flex';
+  }
+  
+  function closeShippingModal() {
+    document.getElementById('shippingModal').style.display = 'none';
   }
 </script>
 {% endblock %}

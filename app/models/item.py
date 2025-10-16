@@ -35,6 +35,9 @@ class Item(Base):
     digital_file_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     github_repo_read_grant: Mapped[str | None] = mapped_column(String(256), nullable=True)  # optional repo slug
     
+    # Для физических товаров (OFFLINE)
+    stock: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    shipping_info_text: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # visibility
     is_visible: Mapped[bool] = mapped_column(default=True, nullable=False)
