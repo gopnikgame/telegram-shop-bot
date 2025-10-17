@@ -46,10 +46,7 @@
 ### 🚀 Автоматическая установка (рекомендуется)
 
 ```bash
-# Загрузите и запустите установщик
-curl -o launcher.sh https://raw.githubusercontent.com/gopnikgame/telegram-shop-bot/main/launcher.sh
-chmod +x launcher.sh
-sudo ./launcher.sh
+curl -o launcher.sh https://raw.githubusercontent.com/gopnikgame/telegram-shop-bot/main/launcher.sh && chmod +x launcher.sh && sudo ./launcher.sh
 ```
 
 Скрипт автоматически:
