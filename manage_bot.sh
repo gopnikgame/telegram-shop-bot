@@ -191,11 +191,12 @@ update_repo() {
     [ -f "$ENV_FILE" ] && cp "$ENV_FILE" "$backup_dir/"
     [ -f "$TEXTS_FILE" ] && cp "$TEXTS_FILE" "$backup_dir/"
     
-    # Stash локальных изменений
+    # Проверяем изменения только в отслеживаемых файлах (исключая .gitignore)
     local STASHED="false"
-    if ! git diff --quiet HEAD -- "$ENV_FILE" "$TEXTS_FILE"; then
+    if ! git diff --quiet HEAD 2>/dev/null; then
+        # Есть изменения в отслеживаемых файлах
         log "BLUE" "💾 Сохранение локальных изменений..."
-        git stash push -u "$ENV_FILE" "$TEXTS_FILE"
+        git stash push -m "Auto-stash before update $(date +%Y%m%d_%H%M%S)"
         STASHED="true"
     fi
 
@@ -212,8 +213,19 @@ update_repo() {
         
         if [[ ! "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
             log "YELLOW" "⚠️ Обновление отменено"
+            # Восстанавливаем stash если был
+            if [[ "$STASHED" == "true" ]]; then
+                git stash pop 2>/dev/null || true
+            fi
             return 0
         fi
+    else
+        log "GREEN" "✅ Репозиторий уже актуален"
+        # Восстанавливаем stash если был
+        if [[ "$STASHED" == "true" ]]; then
+            git stash pop 2>/dev/null || true
+        fi
+        return 0
     fi
     
     git reset --hard origin/main
@@ -222,14 +234,26 @@ update_repo() {
     # Восстановление локальных изменений
     if [[ "$STASHED" == "true" ]]; then
         log "BLUE" "♻️ Восстановление локальных изменений..."
-        if git stash pop; then
+        if git stash pop 2>/dev/null; then
             log "GREEN" "✅ Локальные изменения восстановлены"
         else
-            log "YELLOW" "⚠️ Конфликты при восстановлении. Проверьте файлы:"
-            log "YELLOW" "  - $ENV_FILE"
-            log "YELLOW" "  - $TEXTS_FILE"
+            log "YELLOW" "⚠️ Конфликты при восстановлении."
             log "YELLOW" "  Бэкап сохранен в: $backup_dir"
+            log "YELLOW" "  Используйте 'git stash list' для просмотра сохраненных изменений"
         fi
+    fi
+    
+    # Восстанавливаем .env и texts.yml из бэкапа если нужно
+    if [ ! -f "$ENV_FILE" ] && [ -f "$backup_dir/.env" ]; then
+        log "BLUE" "♻️ Восстановление .env из бэкапа..."
+        cp "$backup_dir/.env" "$ENV_FILE"
+        log "GREEN" "✅ .env восстановлен"
+    fi
+    
+    if [ ! -f "$TEXTS_FILE" ] && [ -f "$backup_dir/texts.yml" ]; then
+        log "BLUE" "♻️ Восстановление texts.yml из бэкапа..."
+        cp "$backup_dir/texts.yml" "$TEXTS_FILE"
+        log "GREEN" "✅ texts.yml восстановлен"
     fi
     
     log "GREEN" "✅ Обновление завершено"
