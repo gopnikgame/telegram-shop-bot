@@ -195,3 +195,5 @@ cython_debug/
 
 .DS_Store
 /.vs
+docs/MIGRATION_FIX.md
+docs/QUICK_FIX.md
