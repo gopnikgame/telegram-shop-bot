@@ -251,12 +251,31 @@ async def items_create(
     digital_file: Optional[UploadFile] = File(None),
     github_repo_read_grant: Optional[str] = Form(None),
     # Поля для физических товаров
-    stock_quantity: Optional[int] = Form(None),
-    weight: Optional[float] = Form(None),
+    stock_quantity: Optional[str] = Form(None),
+    weight: Optional[str] = Form(None),
     dimensions: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db_session),
     _: None = Depends(ensure_auth),
 ):
+    # Преобразуем пустые строки в None и конвертируем в нужные типы
+    stock_value = None
+    if stock_quantity and stock_quantity.strip():
+        try:
+            stock_value = int(stock_quantity)
+        except ValueError:
+            stock_value = 0
+    
+    weight_value = None
+    if weight and weight.strip():
+        try:
+            weight_value = float(weight)
+        except ValueError:
+            weight_value = None
+    
+    dimensions_value = None
+    if dimensions and dimensions.strip():
+        dimensions_value = dimensions.strip()
+    
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
@@ -313,13 +332,13 @@ async def items_create(
     
     elif item_type == ItemType.OFFLINE:
         # Обработка полей физических товаров
-        item.stock = stock_quantity if stock_quantity else 0
+        item.stock = stock_value if stock_value is not None else 0
         # Сохраняем информацию о весе и габаритах в поле shipping_info_text
         shipping_parts = []
-        if weight and weight > 0:
-            shipping_parts.append(f"Вес: {weight} кг")
-        if dimensions and dimensions.strip():
-            shipping_parts.append(f"Габариты: {dimensions.strip()}")
+        if weight_value and weight_value > 0:
+            shipping_parts.append(f"Вес: {weight_value} кг")
+        if dimensions_value:
+            shipping_parts.append(f"Габариты: {dimensions_value}")
         if shipping_parts:
             item.shipping_info_text = " | ".join(shipping_parts)
 
@@ -374,12 +393,31 @@ async def items_update(
     github_repo_read_grant: Optional[str] = Form(None),
     codes_file: Optional[UploadFile] = File(None),
     # Поля для физических товаров
-    stock_quantity: Optional[int] = Form(None),
-    weight: Optional[float] = Form(None),
+    stock_quantity: Optional[str] = Form(None),  # Изменили на str для обработки пустых строк
+    weight: Optional[str] = Form(None),  # Изменили на str для обработки пустых строк
     dimensions: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db_session),
     _: None = Depends(ensure_auth),
 ):
+    # Преобразуем пустые строки в None и конвертируем в нужные типы
+    stock_value = None
+    if stock_quantity and stock_quantity.strip():
+        try:
+            stock_value = int(stock_quantity)
+        except ValueError:
+            stock_value = 0
+    
+    weight_value = None
+    if weight and weight.strip():
+        try:
+            weight_value = float(weight)
+        except ValueError:
+            weight_value = None
+    
+    dimensions_value = None
+    if dimensions and dimensions.strip():
+        dimensions_value = dimensions.strip()
+    
     item = (await db.execute(select(Item).where(Item.id == item_id))).scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="item not found")
@@ -448,13 +486,13 @@ async def items_update(
     
     elif item_type == ItemType.OFFLINE:
         # Обработка полей физических товаров
-        item.stock = stock_quantity if stock_quantity else 0
+        item.stock = stock_value if stock_value is not None else 0
         # Сохраняем информацию о весе и габаритах в поле shipping_info_text
         shipping_parts = []
-        if weight and weight > 0:
-            shipping_parts.append(f"Вес: {weight} кг")
-        if dimensions and dimensions.strip():
-            shipping_parts.append(f"Габариты: {dimensions.strip()}")
+        if weight_value and weight_value > 0:
+            shipping_parts.append(f"Вес: {weight_value} кг")
+        if dimensions_value:
+            shipping_parts.append(f"Габариты: {dimensions_value}")
         if shipping_parts:
             item.shipping_info_text = " | ".join(shipping_parts)
         else:
