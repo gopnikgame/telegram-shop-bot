@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 from loguru import logger
 
 from app.config import settings
@@ -22,6 +23,11 @@ def create_app() -> FastAPI:
 
     # Static uploads
     app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
+
+    # Redirect root to admin
+    @app.get("/")
+    async def root():
+        return RedirectResponse(url="/admin/")
 
     @app.on_event("startup")
     async def _on_startup() -> None:
