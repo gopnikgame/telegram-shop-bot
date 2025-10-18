@@ -5,32 +5,53 @@ from app.config import settings
 
 def main_menu_kb(texts: dict, is_admin: bool = False, cart_count: int = 0) -> InlineKeyboardMarkup:
     b = texts["main_menu"]["buttons"]
-    row1 = [
-        InlineKeyboardButton(text=b["projects"], callback_data="menu:projects"),
-    ]
-    row2 = [InlineKeyboardButton(text=b["services"], callback_data="menu:services")]
-    row3 = [InlineKeyboardButton(text=b["purchased"], callback_data="menu:purchased")]
+    show_btns = texts["main_menu"].get("show_buttons", {})
     
-    # Добавляем кнопку корзины с количеством товаров
-    cart_text = b.get("cart", "🛒 Корзина")
-    if cart_count > 0:
-        cart_text = f"{cart_text} ({cart_count})"
-    row_cart = [InlineKeyboardButton(text=cart_text, callback_data="menu:cart")]
+    rows = []
     
-    row4 = []
-    if settings.show_donate_button:
-        row4 = [InlineKeyboardButton(text=b["donate"], callback_data="menu:donate")]
-    if settings.show_contact_button and settings.admin_tg_username:
-        row5 = [InlineKeyboardButton(text=b["contact"], url=f"https://t.me/{settings.admin_tg_username.lstrip('@')}")]
-    elif settings.show_contact_button:
-        row5 = [InlineKeyboardButton(text=b["contact"], callback_data="menu:contact")]
-    rows = [row1, row2, row3, row_cart]
-    if row4:
-        rows.append(row4)
+    # Первая строка: Проекты, Товары, Услуги (в зависимости от настроек)
+    row1 = []
+    if show_btns.get("projects", False):
+        row1.append(InlineKeyboardButton(text=b["projects"], callback_data="menu:projects"))
+    if show_btns.get("products", True):
+        row1.append(InlineKeyboardButton(text=b["products"], callback_data="menu:products"))
+    if show_btns.get("services", True):
+        row1.append(InlineKeyboardButton(text=b["services"], callback_data="menu:services"))
+    
+    if row1:
+        # Если кнопок больше 2, разбиваем на строки по 2
+        if len(row1) > 2:
+            rows.append(row1[:2])
+            rows.append(row1[2:])
+        else:
+            rows.append(row1)
+    
+    # Купленные товары
+    if show_btns.get("purchased", True):
+        rows.append([InlineKeyboardButton(text=b["purchased"], callback_data="menu:purchased")])
+    
+    # Корзина с количеством товаров
+    if show_btns.get("cart", True):
+        cart_text = b.get("cart", "🛒 Корзина")
+        if cart_count > 0:
+            cart_text = f"{cart_text} ({cart_count})"
+        rows.append([InlineKeyboardButton(text=cart_text, callback_data="menu:cart")])
+    
+    # Донат (также проверяем настройки из env)
+    if show_btns.get("donate", True) and settings.show_donate_button:
+        rows.append([InlineKeyboardButton(text=b["donate"], callback_data="menu:donate")])
+    
+    # Администрирование
     if is_admin:
         rows.append([InlineKeyboardButton(text=b.get("admin", "🛠 Администрирование"), callback_data="menu:admin")])
-    if settings.show_contact_button:
-        rows.append(row5)
+    
+    # Связаться (также проверяем настройки из env)
+    if show_btns.get("contact", True) and settings.show_contact_button:
+        if settings.admin_tg_username:
+            rows.append([InlineKeyboardButton(text=b["contact"], url=f"https://t.me/{settings.admin_tg_username.lstrip('@')}")])
+        else:
+            rows.append([InlineKeyboardButton(text=b["contact"], callback_data="menu:contact")])
+    
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def back_kb(cb_data: str = "back:main") -> InlineKeyboardMarkup:

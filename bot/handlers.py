@@ -155,7 +155,9 @@ async def quick_menu_commands(message: Message) -> None:
     if cmd == "projects":
         await list_items(message, ItemType.DIGITAL, section="projects", page=1)
         return
-    # Солобот модули удалены
+    if cmd in ("products", "shop", "товары"):
+        await list_items(message, ItemType.OFFLINE, section="products", page=1)
+        return
     if cmd == "services":
         await list_items(message, ItemType.SERVICE, section="services", page=1)
         return
@@ -207,6 +209,7 @@ async def main_menu_callback(call: CallbackQuery) -> None:
     # Маппинг для определения типа элементов и секции
     section_mapping = {
         "projects": (ItemType.DIGITAL, "projects"),
+        "products": (ItemType.OFFLINE, "products"),
         "services": (ItemType.SERVICE, "services"),
     }
 
@@ -267,6 +270,7 @@ async def main_menu_callback(call: CallbackQuery) -> None:
         page_num = int(page_str) if page_str.isdigit() else 1
         mapping = {
             "digital": (ItemType.DIGITAL, "projects"),
+            "offline": (ItemType.OFFLINE, "products"),
             "service": (ItemType.SERVICE, "services"),
         }
         if type_str in mapping:
@@ -333,6 +337,7 @@ async def list_pagination(call: CallbackQuery) -> None:
         type_str = "digital"
     mapping = {
         "digital": (ItemType.DIGITAL, "projects"),
+        "offline": (ItemType.OFFLINE, "products"),
         "service": (ItemType.SERVICE, "services"),
     }
     if type_str in mapping:
@@ -682,6 +687,7 @@ async def list_items(message: Message, item_type: ItemType, section: str = None,
     if not items:
         empty_key = {
             ItemType.DIGITAL: "items",
+            ItemType.OFFLINE: "products",
             ItemType.SERVICE: "service",
         }.get(item_type, "items")
         empty_text = texts.get("empty", {}).get(empty_key, "Товаров пока-что нет, но вы держитесь!")
@@ -694,6 +700,7 @@ async def list_items(message: Message, item_type: ItemType, section: str = None,
     if section is None:
         section_mapping = {
             ItemType.DIGITAL: "projects",
+            ItemType.OFFLINE: "products",
             ItemType.SERVICE: "services",
         }
         section = section_mapping.get(item_type)
@@ -1204,7 +1211,7 @@ async def offline_capture_fullname(message: Message, state: FSMContext) -> None:
     texts = load_texts()
     prompt = texts.get("offline_delivery", {}).get("prompts", {}).get(
         "phone",
-        "📞 Введите номер телефона для связи:"
+        "📞 Введите номера телефона для связи:"
     )
     
     await message.answer(prompt, reply_markup=back_kb("menu:cart"))
@@ -1236,21 +1243,8 @@ async def offline_capture_phone(message: Message, state: FSMContext) -> None:
 async def offline_capture_address(message: Message, state: FSMContext) -> None:
     address = (message.text or "").strip()
     
-    # Улучшенная валидация
-    if not address or len(address) < 10:
-        await message.answer("❌ Пожалуйста, введите полный адрес (минимум 10 символов)")
-        return
-    
-    # Проверка наличия ключевых элементов адреса
-    address_lower = address.lower()
-    has_street = any(keyword in address_lower for keyword in ['ул', 'улица', 'пр', 'проспект', 'пер', 'переулок', 'бульвар', 'б-р', 'наб', 'набережная', 'просп', 'шоссе', 'ш.'])
-    has_building = any(keyword in address_lower for keyword in ['д.', 'д ', 'дом'])
-    
-    if not has_street or not has_building:
-        await message.answer(
-            "❌ Пожалуйста, укажите полный адрес с улицей и номером дома\n"
-            "Например: ул. Ленина, д. 10, кв. 5"
-        )
+    if not address or len(address) < 3:
+        await message.answer("❌ Пожалуйста, введите корректный адрес доставки")
         return
     
     await state.update_data(delivery_address=address)
@@ -1258,46 +1252,29 @@ async def offline_capture_address(message: Message, state: FSMContext) -> None:
     texts = load_texts()
     prompt = texts.get("offline_delivery", {}).get("prompts", {}).get(
         "comment",
-        "💬 Добавьте комментарий к заказу (или пропустите):"
+        "📝 Введите комментарий к заказу (необязательно):"
     )
     
-    await message.answer(prompt, reply_markup=skip_kb("offline:skip_comment"))
+    await message.answer(prompt, reply_markup=back_kb("menu:cart"))
     await state.set_state(OfflineDeliveryStates.waiting_for_comment)
 
 
 @router.message(OfflineDeliveryStates.waiting_for_comment)
 async def offline_capture_comment(message: Message, state: FSMContext) -> None:
     comment = (message.text or "").strip()
-    await state.update_data(delivery_comment=comment)
-    await finalize_offline_order(message, state)
-
-
-@router.callback_query(F.data == "offline:skip_comment")
-async def offline_skip_comment(call: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(delivery_comment=None)
-    await finalize_offline_order(call.message, state, call=call)
-
-
-async def finalize_offline_order(message: Message, state: FSMContext, call: CallbackQuery = None) -> None:
-    """Финализация оффлайн заказа с созданием платежа"""
-    data = await state.get_data()
     
+    await state.update_data(delivery_comment=comment)
+    
+    data = await state.get_data()
+    cart_items = data.get("cart_items")
+    total_amount = data.get("total_amount", 0)
+    
+    # Создаем заказ
     async with AsyncSessionLocal() as db:
-        user = (await db.execute(select(User).where(User.tg_id == message.chat.id))).scalar_one_or_none()
+        user = (await db.execute(select(User).where(User.tg_id == message.from_user.id))).scalar_one_or_none()
         if not user:
-            await message.answer("❌ Ошибка: пользователь не найден")
-            await state.clear()
+            await message.answer("Пользователь не найден")
             return
-        
-        item_ids = data.get('cart_items', [])
-        items = (await db.execute(select(Item).where(Item.id.in_(item_ids)))).scalars().all()
-        
-        if not items:
-            await message.answer("❌ Ошибка: товары не найдены")
-            await state.clear()
-            return
-        
-        total_amount = data.get('total_amount', sum(it.price_minor for it in items))
         
         order = Order(
             user_id=user.id,
@@ -1306,97 +1283,32 @@ async def finalize_offline_order(message: Message, state: FSMContext, call: Call
             currency="RUB",
             payment_method=PaymentMethod.CARD_RF,
             status=OrderStatus.CREATED,
-            buyer_tg_id=str(message.chat.id),
+            buyer_tg_id=str(message.from_user.id),
         )
         db.add(order)
         await db.flush()
         
-        client = YooKassaClient()
-        try:
-            import uuid
-            idem = str(uuid.uuid4())
-            templates = load_texts().get("payment", {}).get("description_templates", {})
-            description = (templates.get("offline") or "Оффлайн заказ #{order_id}").format(order_id=order.id)
-            
-            resp = await client.create_payment(
-                amount_minor=total_amount,
-                description=description,
-                payment_id=f"offline:{order.id}",
-                payment_method_type=None,
-                metadata={
-                    "offline_order_id": str(order.id),
-                    "item_ids": ",".join(str(i.id) for i in items),
-                    "has_delivery": "true"
-                },
-                customer_email=f"{message.chat.id}@{settings.email_domain}",
-                idempotence_key=idem,
-            )
-            
-            url = (resp or {}).get("confirmation", {}).get("confirmation_url")
-            if not url:
-                # Откат транзакции при ошибке
-                await db.rollback()
-                await message.answer("❌ Не удалось создать заказ. Попробуйте позже.")
-                return
-            
-            order.fk_order_id = resp.get("id")
-            order.fk_payment_url = url
-            order.status = OrderStatus.PENDING
-            
-            for item in items:
-                purchase = Purchase(
-                    order_id=order.id,
-                    user_id=user.id,
-                    item_id=item.id,
-                    delivery_info=f"Заказ #{order.id}",
-                    delivery_fullname=data.get('delivery_fullname'),
-                    delivery_phone=data.get('delivery_phone'),
-                    delivery_address=data.get('delivery_address'),
-                    delivery_comment=data.get('delivery_comment')
-                )
-                db.add(purchase)
-            
-            await db.commit()
-            
-            # Очищаем корзину после успешного создания заказа
-            await db.execute(delete(CartItem).where(CartItem.user_id == user.id))
-            await db.commit()
-            
-            # Отправляем уведомление администратору
-            await send_offline_order_to_admin(
+        # Сохраняем покупки
+        for item_id in cart_items:
+            purchase = Purchase(
                 order_id=order.id,
-                items=items,
-                delivery_data={
-                    'fullname': data.get('delivery_fullname'),
-                    'phone': data.get('delivery_phone'),
-                    'address': data.get('delivery_address'),
-                    'comment': data.get('delivery_comment')
-                },
-                bot=message.bot
+                user_id=user.id,
+                item_id=item_id,
+                delivery_info=None
             )
-            
-            success_text = (
-                "✅ *Заказ успешно оформлен!*\n\n"
-                f"📦 Номер заказа: `#{order.id}`\n"
-                f"💰 Сумма: `{total_amount/100:.2f}` ₽\n\n"
-                "Администратор свяжется с вами для уточнения деталей доставки."
-            )
-            
-            await message.answer(
-                success_text,
-                parse_mode="Markdown",
-                reply_markup=payment_link_kb(url)
-            )
-            
-        except Exception as e:
-            # Откат транзакции при любой ошибке
-            await db.rollback()
-            logger.error(f"Error finalizing offline order: {e}")
-            await message.answer("❌ Не удалось создать заказ. Попробуйте позже.")
-        finally:
-            await client.close()
+            db.add(purchase)
+        
+        await db.commit()
+        
+        # Оповещаем админа
+        items = (await db.execute(select(Item).where(Item.id.in_(cart_items)))).scalars().all()
+        await send_offline_order_to_admin(order.id, items, {
+            "fullname": data.get("delivery_fullname"),
+            "phone": data.get("delivery_phone"),
+            "address": data.get("delivery_address"),
+            "comment": data.get("delivery_comment"),
+        }, message.bot)
+        
+        await message.answer("✅ Заказ создан и отправлен на подтверждение администратору")
     
     await state.clear()
-    
-    if call:
-        await call.answer()
