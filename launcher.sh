@@ -23,12 +23,12 @@ log() {
     echo -e "${!level}${message}${NC}" | tee -a "$LOG_FILE"
 }
 
-# Функция для создания симлинков
+# Функция для создания wrapper-скриптов
 create_symlinks() {
-    log "BLUE" "🔗 Создание симлинков для быстрого запуска..."
+    log "BLUE" "🔗 Создание wrapper-скриптов для быстрого запуска..."
     
     local manage_script="$INSTALL_DIR/manage_bot.sh"
-    local symlink_dir="/usr/local/bin"
+    local bin_dir="/usr/local/bin"
     
     # Проверяем существование скрипта
     if [ ! -f "$manage_script" ]; then
@@ -36,29 +36,37 @@ create_symlinks() {
         return 1
     fi
     
-    # Создаем симлинки
-    local symlinks=("shopbot" "manager")
-    for symlink in "${symlinks[@]}"; do
-        local symlink_path="$symlink_dir/$symlink"
+    # Создаем wrapper-скрипты
+    local commands=("shopbot" "manager")
+    for cmd in "${commands[@]}"; do
+        local wrapper_path="$bin_dir/$cmd"
         
-        # Удаляем старый симлинк, если существует
-        if [ -L "$symlink_path" ] || [ -f "$symlink_path" ]; then
-            log "YELLOW" "⚠️ Удаление существующего симлинка $symlink..."
-            rm -f "$symlink_path"
+        # Удаляем старый файл, если существует
+        if [ -f "$wrapper_path" ]; then
+            log "YELLOW" "⚠️ Удаление существующего скрипта $cmd..."
+            rm -f "$wrapper_path"
         fi
         
-        # Создаем новый симлинк
-        ln -s "$manage_script" "$symlink_path"
-        chmod +x "$symlink_path"
+        # Создаем wrapper-скрипт
+        cat > "$wrapper_path" << EOF
+#!/bin/bash
+# Wrapper script for telegram-shop-bot manager
+cd "$INSTALL_DIR" && exec bash manage_bot.sh "\$@"
+EOF
         
-        if [ -L "$symlink_path" ]; then
-            log "GREEN" "✅ Создан симлинк: $symlink → $manage_script"
+        # Устанавливаем права на выполнение
+        chmod +x "$wrapper_path"
+        
+        if [ -x "$wrapper_path" ]; then
+            log "GREEN" "✅ Создан wrapper-скрипт: $cmd"
         else
-            log "RED" "❌ Не удалось создать симлинк $symlink"
+            log "RED" "❌ Не удалось создать wrapper-скрипт $cmd"
         fi
     done
     
-    log "GREEN" "✅ Симлинки созданы. Теперь можно запускать: shopbot или manager"
+    log "GREEN" "✅ Wrapper-скрипты созданы. Теперь можно запускать из любой директории:"
+    echo "  - shopbot"
+    echo "  - manager"
 }
 
 # Проверка зависимостей
@@ -138,7 +146,7 @@ if [ -d "$INSTALL_DIR" ]; then
     # Добавляем права на выполнение скрипта manage_bot.sh
     chmod +x manage_bot.sh
     
-    # Создаем симлинки
+    # Создаем wrapper-скрипты
     create_symlinks
     
     # Запускаем скрипт manage_bot.sh
@@ -164,7 +172,7 @@ else
     # Добавляем права на выполнение скрипта manage_bot.sh
     chmod +x manage_bot.sh
     
-    # Создаем симлинки
+    # Создаем wrapper-скрипты
     create_symlinks
     
     # Запускаем скрипт manage_bot.sh
