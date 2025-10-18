@@ -3,7 +3,16 @@
 
 set -e
 
-echo "??  ВНИМАНИЕ: Все данные будут удалены!"
+# Функция для запуска docker-compose
+docker_compose_cmd() {
+    if command -v docker-compose &> /dev/null; then
+        docker-compose "$@"
+    else
+        docker compose "$@"
+    fi
+}
+
+echo "⚠️  ВНИМАНИЕ: Все данные будут удалены!"
 read -p "Продолжить? (yes/no): " confirm
 
 if [ "$confirm" != "yes" ]; then
@@ -11,19 +20,19 @@ if [ "$confirm" != "yes" ]; then
     exit 0
 fi
 
-echo "???  Останавливаем контейнеры..."
-docker-compose down
+echo "⏹️  Останавливаем контейнеры..."
+docker_compose_cmd down
 
-echo "???  Удаляем volume с базой данных..."
+echo "🗑️  Удаляем volume с базой данных..."
 docker volume rm telegram-shop-bot_postgres_data || true
 
-echo "?? Запускаем контейнеры..."
-docker-compose up -d
+echo "▶️ Запускаем контейнеры..."
+docker_compose_cmd up -d
 
-echo "? Ждём запуска базы данных..."
+echo "⏳ Ждём запуска базы данных..."
 sleep 5
 
-echo "?? Применяем миграции..."
-docker-compose exec -T shopbot-api alembic upgrade head
+echo "🔄 Применяем миграции..."
+docker_compose_cmd exec -T api alembic upgrade head
 
-echo "? База данных пересоздана!"
+echo "✅ База данных пересоздана!"

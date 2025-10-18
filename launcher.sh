@@ -23,6 +23,44 @@ log() {
     echo -e "${!level}${message}${NC}" | tee -a "$LOG_FILE"
 }
 
+# Функция для создания симлинков
+create_symlinks() {
+    log "BLUE" "🔗 Создание симлинков для быстрого запуска..."
+    
+    local manage_script="$INSTALL_DIR/manage_bot.sh"
+    local symlink_dir="/usr/local/bin"
+    
+    # Проверяем существование скрипта
+    if [ ! -f "$manage_script" ]; then
+        log "RED" "❌ Файл $manage_script не найден"
+        return 1
+    fi
+    
+    # Создаем симлинки
+    local symlinks=("shopbot" "manager")
+    for symlink in "${symlinks[@]}"; do
+        local symlink_path="$symlink_dir/$symlink"
+        
+        # Удаляем старый симлинк, если существует
+        if [ -L "$symlink_path" ] || [ -f "$symlink_path" ]; then
+            log "YELLOW" "⚠️ Удаление существующего симлинка $symlink..."
+            rm -f "$symlink_path"
+        fi
+        
+        # Создаем новый симлинк
+        ln -s "$manage_script" "$symlink_path"
+        chmod +x "$symlink_path"
+        
+        if [ -L "$symlink_path" ]; then
+            log "GREEN" "✅ Создан симлинк: $symlink → $manage_script"
+        else
+            log "RED" "❌ Не удалось создать симлинк $symlink"
+        fi
+    done
+    
+    log "GREEN" "✅ Симлинки созданы. Теперь можно запускать: shopbot или manager"
+}
+
 # Проверка зависимостей
 log "BLUE" "🔍 Проверка зависимостей..."
 if ! command -v git &> /dev/null || ! command -v docker &> /dev/null || ! command -v nano &> /dev/null; then
@@ -100,6 +138,9 @@ if [ -d "$INSTALL_DIR" ]; then
     # Добавляем права на выполнение скрипта manage_bot.sh
     chmod +x manage_bot.sh
     
+    # Создаем симлинки
+    create_symlinks
+    
     # Запускаем скрипт manage_bot.sh
     log "BLUE" "🚀 Запуск основного скрипта управления..."
     ./manage_bot.sh
@@ -122,6 +163,10 @@ else
     cd "$INSTALL_DIR"
     # Добавляем права на выполнение скрипта manage_bot.sh
     chmod +x manage_bot.sh
+    
+    # Создаем симлинки
+    create_symlinks
+    
     # Запускаем скрипт manage_bot.sh
     log "BLUE" "🚀 Запуск основного скрипта управления..."
     ./manage_bot.sh
