@@ -18,6 +18,12 @@ def upgrade() -> None:
     item_type = postgresql.ENUM('service', 'digital', 'offline', name='item_type')
     item_type.create(op.get_bind(), checkfirst=True)
     
+    pricing_type = postgresql.ENUM('per_hour', 'per_service', name='pricing_type')
+    pricing_type.create(op.get_bind(), checkfirst=True)
+    
+    payment_method = postgresql.ENUM('CARD_RF', 'SBP_QR', name='payment_method')
+    payment_method.create(op.get_bind(), checkfirst=True)
+    
     order_status = postgresql.ENUM('created', 'pending', 'paid', 'failed', 'canceled', name='order_status')
     order_status.create(op.get_bind(), checkfirst=True)
     
@@ -47,17 +53,17 @@ def upgrade() -> None:
         sa.Column('image_file_id', sa.String(length=256), nullable=True),
         
         # Service fields
+        sa.Column('pricing_type', sa.Enum('per_hour', 'per_service', name='pricing_type'), nullable=True),
         sa.Column('service_admin_contact', sa.String(length=128), nullable=True),
         
         # Digital fields
+        sa.Column('delivery_type', sa.String(length=20), nullable=True),  # file/github/codes
         sa.Column('digital_file_path', sa.String(length=512), nullable=True),
         sa.Column('github_repo_read_grant', sa.String(length=256), nullable=True),
-        sa.Column('delivery_type', sa.String(length=64), nullable=True),  # file/github/codes
         
-        # Physical/Offline fields
-        sa.Column('weight', sa.Integer(), nullable=True),
-        sa.Column('dimensions', sa.String(length=128), nullable=True),
-        sa.Column('stock_quantity', sa.Integer(), nullable=True),
+        # Physical/Offline fields (соответствуют модели)
+        sa.Column('stock', sa.Integer(), nullable=True),
+        sa.Column('shipping_info_text', sa.Text(), nullable=True),
         
         sa.Column('is_visible', sa.Boolean(), nullable=False, server_default=sa.text('true')),
     )
@@ -86,9 +92,9 @@ def upgrade() -> None:
         sa.Column('item_id', sa.Integer(), sa.ForeignKey('items.id', ondelete='SET NULL'), nullable=True),
         sa.Column('delivery_info', sa.String(length=1024), nullable=True),
         
-        # Offline delivery fields
-        sa.Column('delivery_fullname', sa.String(length=256), nullable=True),
-        sa.Column('delivery_phone', sa.String(length=64), nullable=True),
+        # Offline delivery fields (соответствуют модели Purchase)
+        sa.Column('delivery_fullname', sa.String(length=200), nullable=True),
+        sa.Column('delivery_phone', sa.String(length=20), nullable=True),
         sa.Column('delivery_address', sa.Text(), nullable=True),
         sa.Column('delivery_comment', sa.Text(), nullable=True),
     )
@@ -115,6 +121,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index('ix_cart_items_user', table_name='cart_items')
     op.drop_table('cart_items')
     op.drop_table('item_codes')
     op.drop_table('purchases')
@@ -125,6 +132,12 @@ def downgrade() -> None:
     
     order_status = postgresql.ENUM('created', 'pending', 'paid', 'failed', 'canceled', name='order_status')
     order_status.drop(op.get_bind(), checkfirst=True)
+    
+    payment_method = postgresql.ENUM('CARD_RF', 'SBP_QR', name='payment_method')
+    payment_method.drop(op.get_bind(), checkfirst=True)
+    
+    pricing_type = postgresql.ENUM('per_hour', 'per_service', name='pricing_type')
+    pricing_type.drop(op.get_bind(), checkfirst=True)
     
     item_type = postgresql.ENUM('service', 'digital', 'offline', name='item_type')
     item_type.drop(op.get_bind(), checkfirst=True)

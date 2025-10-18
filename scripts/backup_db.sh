@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Бэкап базы данных telegram-shop-bot
-# Использование: ./scripts/backup_db.sh
+# Р‘СЌРєР°Рї Р±Р°Р·С‹ РґР°РЅРЅС‹С… telegram-shop-bot
+# РСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ: ./scripts/backup_db.sh
 
 set -euo pipefail
 
@@ -11,10 +11,10 @@ BACKUPS_DIR="$PROJECT_ROOT/backups"
 
 cd "$PROJECT_ROOT"
 
-# Создаем директорию для бэкапов
+# РЎРѕР·РґР°РµРј РґРёСЂРµРєС‚РѕСЂРёСЋ РґР»СЏ Р±СЌРєР°РїРѕРІ
 mkdir -p "$BACKUPS_DIR"
 
-# Цвета
+# Р¦РІРµС‚Р°
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
@@ -22,16 +22,16 @@ NC='\033[0m'
 
 BACKUP_FILE="$BACKUPS_DIR/db_backup_$(date +%Y%m%d_%H%M%S).sql"
 
-echo -e "${BLUE}?? Создание бэкапа базы данных...${NC}"
+echo -e "${BLUE}?? РЎРѕР·РґР°РЅРёРµ Р±СЌРєР°РїР° Р±Р°Р·С‹ РґР°РЅРЅС‹С…...${NC}"
 
 if docker ps | grep -q "shopbot-postgres"; then
     docker exec shopbot-postgres pg_dump -U shopbot shopbot > "$BACKUP_FILE"
-    echo -e "${GREEN}? Бэкап создан: $BACKUP_FILE${NC}"
+    echo -e "${GREEN}? Р‘СЌРєР°Рї СЃРѕР·РґР°РЅ: $BACKUP_FILE${NC}"
     
-    # Показываем размер файла
+    # РџРѕРєР°Р·С‹РІР°РµРј СЂР°Р·РјРµСЂ С„Р°Р№Р»Р°
     SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
-    echo "   Размер: $SIZE"
+    echo "   Р Р°Р·РјРµСЂ: $SIZE"
 else
-    echo -e "${RED}? База данных не запущена${NC}"
+    echo -e "${RED}? Р‘Р°Р·Р° РґР°РЅРЅС‹С… РЅРµ Р·Р°РїСѓС‰РµРЅР°${NC}"
     exit 1
 fi

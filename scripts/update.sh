@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Обновление telegram-shop-bot из репозитория
-# Использование: ./scripts/update.sh
+# РћР±РЅРѕРІР»РµРЅРёРµ telegram-shop-bot РёР· СЂРµРїРѕР·РёС‚РѕСЂРёСЏ
+# РСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ: ./scripts/update.sh
 
 set -euo pipefail
 
@@ -10,70 +10,70 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
 
-# Цвета
+# Р¦РІРµС‚Р°
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${BLUE}?? Обновление Telegram Shop Bot...${NC}\n"
+echo -e "${BLUE}?? РћР±РЅРѕРІР»РµРЅРёРµ Telegram Shop Bot...${NC}\n"
 
-# Проверка git репозитория
+# РџСЂРѕРІРµСЂРєР° git СЂРµРїРѕР·РёС‚РѕСЂРёСЏ
 if [ ! -d ".git" ]; then
-    echo -e "${RED}? Текущая директория не является git-репозиторием${NC}"
+    echo -e "${RED}? РўРµРєСѓС‰Р°СЏ РґРёСЂРµРєС‚РѕСЂРёСЏ РЅРµ СЏРІР»СЏРµС‚СЃСЏ git-СЂРµРїРѕР·РёС‚РѕСЂРёРµРј${NC}"
     exit 1
 fi
 
-# Создаем бэкап конфигурационных файлов
+# РЎРѕР·РґР°РµРј Р±СЌРєР°Рї РєРѕРЅС„РёРіСѓСЂР°С†РёРѕРЅРЅС‹С… С„Р°Р№Р»РѕРІ
 BACKUPS_DIR="$PROJECT_ROOT/backups"
 mkdir -p "$BACKUPS_DIR"
 BACKUP_DIR="$BACKUPS_DIR/config_backup_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$BACKUP_DIR"
 
-echo -e "${BLUE}?? Создание бэкапа конфигурации...${NC}"
+echo -e "${BLUE}?? РЎРѕР·РґР°РЅРёРµ Р±СЌРєР°РїР° РєРѕРЅС„РёРіСѓСЂР°С†РёРё...${NC}"
 [ -f ".env" ] && cp .env "$BACKUP_DIR/" && echo "  ? .env"
 [ -f "app/texts.yml" ] && cp app/texts.yml "$BACKUP_DIR/" && echo "  ? app/texts.yml"
 
-# Сохраняем локальные изменения
+# РЎРѕС…СЂР°РЅСЏРµРј Р»РѕРєР°Р»СЊРЅС‹Рµ РёР·РјРµРЅРµРЅРёСЏ
 STASHED="false"
 if ! git diff --quiet HEAD -- .env app/texts.yml 2>/dev/null; then
-    echo -e "${BLUE}?? Сохранение локальных изменений...${NC}"
+    echo -e "${BLUE}?? РЎРѕС…СЂР°РЅРµРЅРёРµ Р»РѕРєР°Р»СЊРЅС‹С… РёР·РјРµРЅРµРЅРёР№...${NC}"
     git stash push .env app/texts.yml 2>/dev/null || true
     STASHED="true"
 fi
 
-# Получаем обновления
-echo -e "${BLUE}?? Получение обновлений...${NC}"
+# РџРѕР»СѓС‡Р°РµРј РѕР±РЅРѕРІР»РµРЅРёСЏ
+echo -e "${BLUE}?? РџРѕР»СѓС‡РµРЅРёРµ РѕР±РЅРѕРІР»РµРЅРёР№...${NC}"
 git fetch origin
 
-# Показываем изменения
+# РџРѕРєР°Р·С‹РІР°РµРј РёР·РјРµРЅРµРЅРёСЏ
 CURRENT=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse origin/main)
 
 if [ "$CURRENT" != "$REMOTE" ]; then
-    echo -e "${BLUE}?? Новые изменения:${NC}"
+    echo -e "${BLUE}?? РќРѕРІС‹Рµ РёР·РјРµРЅРµРЅРёСЏ:${NC}"
     git log HEAD..origin/main --oneline --graph --decorate
     echo ""
-    read -p "Применить обновления? [Y/n] " -n 1 -r
+    read -p "РџСЂРёРјРµРЅРёС‚СЊ РѕР±РЅРѕРІР»РµРЅРёСЏ? [Y/n] " -n 1 -r
     echo
     
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
         git reset --hard origin/main
-        echo -e "${GREEN}? Обновления применены${NC}"
+        echo -e "${GREEN}? РћР±РЅРѕРІР»РµРЅРёСЏ РїСЂРёРјРµРЅРµРЅС‹${NC}"
         
-        # Восстанавливаем конфигурацию
+        # Р’РѕСЃСЃС‚Р°РЅР°РІР»РёРІР°РµРј РєРѕРЅС„РёРіСѓСЂР°С†РёСЋ
         if [ "$STASHED" = "true" ]; then
-            echo -e "${BLUE}?? Восстановление конфигурации...${NC}"
+            echo -e "${BLUE}?? Р’РѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ РєРѕРЅС„РёРіСѓСЂР°С†РёРё...${NC}"
             git stash pop 2>/dev/null || {
-                echo -e "${YELLOW}?? Конфликты при восстановлении. Используйте бэкап:${NC}"
+                echo -e "${YELLOW}?? РљРѕРЅС„Р»РёРєС‚С‹ РїСЂРё РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРё. РСЃРїРѕР»СЊР·СѓР№С‚Рµ Р±СЌРєР°Рї:${NC}"
                 echo "   $BACKUP_DIR"
             }
         fi
         
-        # Предлагаем пересобрать контейнеры
+        # РџСЂРµРґР»Р°РіР°РµРј РїРµСЂРµСЃРѕР±СЂР°С‚СЊ РєРѕРЅС‚РµР№РЅРµСЂС‹
         echo ""
-        read -p "Пересобрать и перезапустить контейнеры? [Y/n] " -n 1 -r
+        read -p "РџРµСЂРµСЃРѕР±СЂР°С‚СЊ Рё РїРµСЂРµР·Р°РїСѓСЃС‚РёС‚СЊ РєРѕРЅС‚РµР№РЅРµСЂС‹? [Y/n] " -n 1 -r
         echo
         
         if [[ ! $REPLY =~ ^[Nn]$ ]]; then
@@ -86,11 +86,11 @@ if [ "$CURRENT" != "$REMOTE" ]; then
                 docker compose build
                 docker compose up -d
             fi
-            echo -e "${GREEN}? Контейнеры перезапущены${NC}"
+            echo -e "${GREEN}? РљРѕРЅС‚РµР№РЅРµСЂС‹ РїРµСЂРµР·Р°РїСѓС‰РµРЅС‹${NC}"
         fi
     else
-        echo -e "${YELLOW}?? Обновление отменено${NC}"
+        echo -e "${YELLOW}?? РћР±РЅРѕРІР»РµРЅРёРµ РѕС‚РјРµРЅРµРЅРѕ${NC}"
     fi
 else
-    echo -e "${GREEN}? Уже на последней версии${NC}"
+    echo -e "${GREEN}? РЈР¶Рµ РЅР° РїРѕСЃР»РµРґРЅРµР№ РІРµСЂСЃРёРё${NC}"
 fi

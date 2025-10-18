@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Просмотр логов telegram-shop-bot
-# Использование: 
-#   ./scripts/logs.sh          # Все логи
-#   ./scripts/logs.sh api      # Только API
-#   ./scripts/logs.sh db       # Только PostgreSQL
-#   ./scripts/logs.sh errors   # Только ошибки
-#   ./scripts/logs.sh follow   # Отслеживание в реальном времени
+# РџСЂРѕСЃРјРѕС‚СЂ Р»РѕРіРѕРІ telegram-shop-bot
+# РСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ: 
+#   ./scripts/logs.sh          # Р’СЃРµ Р»РѕРіРё
+#   ./scripts/logs.sh api      # РўРѕР»СЊРєРѕ API
+#   ./scripts/logs.sh db       # РўРѕР»СЊРєРѕ PostgreSQL
+#   ./scripts/logs.sh errors   # РўРѕР»СЊРєРѕ РѕС€РёР±РєРё
+#   ./scripts/logs.sh follow   # РћС‚СЃР»РµР¶РёРІР°РЅРёРµ РІ СЂРµР°Р»СЊРЅРѕРј РІСЂРµРјРµРЅРё
 
 set -euo pipefail
 
@@ -15,7 +15,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
 
-# Функция для запуска docker-compose
+# Р¤СѓРЅРєС†РёСЏ РґР»СЏ Р·Р°РїСѓСЃРєР° docker-compose
 docker_compose_cmd() {
     if command -v docker-compose &> /dev/null; then
         docker-compose "$@"
@@ -28,23 +28,23 @@ LOG_TYPE="${1:-all}"
 
 case $LOG_TYPE in
     api)
-        echo "?? Логи API:"
+        echo "?? Р›РѕРіРё API:"
         docker_compose_cmd logs api --tail=100
         ;;
     db)
-        echo "?? Логи PostgreSQL:"
+        echo "?? Р›РѕРіРё PostgreSQL:"
         docker_compose_cmd logs db --tail=100
         ;;
     errors)
-        echo "? Логи ошибок:"
+        echo "? Р›РѕРіРё РѕС€РёР±РѕРє:"
         docker_compose_cmd logs --tail=200 | grep -i "error\|exception\|failed\|critical"
         ;;
     follow|f)
-        echo "?? Отслеживание логов (Ctrl+C для выхода):"
+        echo "?? РћС‚СЃР»РµР¶РёРІР°РЅРёРµ Р»РѕРіРѕРІ (Ctrl+C РґР»СЏ РІС‹С…РѕРґР°):"
         docker_compose_cmd logs -f
         ;;
     *)
-        echo "?? Все логи:"
+        echo "?? Р’СЃРµ Р»РѕРіРё:"
         docker_compose_cmd logs --tail=100
         ;;
 esac
