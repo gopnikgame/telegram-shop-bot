@@ -23,9 +23,9 @@ main_menu:
     admin: "🛠 Администрирование"
     cart: "🛒 Корзина"
   images:
-    projects: "static/menu/projects.png"
-    services: "static/menu/services.png"
-    purchased: "static/menu/main.jpg"
+    projects: "static/menu/main.png"
+    services: "static/menu/main.png"
+    purchased: "static/menu/main.png"
   section_descriptions:
     projects: "🚀 Готовые проекты и решения для вашего бизнеса"
     services: "🛠️ Профессиональные услуги разработки и администрирования"
@@ -34,8 +34,9 @@ main_menu:
 
 defaults:
   images:
-    service: "static/menu/services.png"
-    digital: "static/menu/projects.png"
+    service: "static/menu/main.png"
+    digital: "static/menu/main.png"
+    offline: "static/menu/main.png"
 
 payment:
   title: "Оплата"
@@ -55,7 +56,7 @@ empty:
 
 donate:
   title: "Поддержите проект"
-  image: "static/menu/donate.jpg"
+  image: "static/menu/main.png"
   buttons:
     back: "⬅ Назад"
   thanks: "Спасибо за поддержку!"
