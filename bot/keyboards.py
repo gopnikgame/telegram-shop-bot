@@ -168,8 +168,12 @@ def cart_kb(items_in_cart: list, total_price: int) -> InlineKeyboardMarkup:
         ])
     
     if items_in_cart:
+        # Форматируем текст кнопки оплаты с подстановкой суммы
+        checkout_text = texts["buttons"].get("checkout", "💳 Оплатить ({total} ₽)")
+        checkout_text = checkout_text.format(total=f"{total_price/100:.2f}")
+        
         kb.append([InlineKeyboardButton(
-            text=texts["buttons"].get("checkout", f"💳 Оплатить ({total_price/100:.2f} ₽)"),
+            text=checkout_text,
             callback_data="cart:checkout"
         )])
         kb.append([InlineKeyboardButton(
