@@ -218,6 +218,7 @@ async def main_menu_callback(call: CallbackQuery) -> None:
         await list_items(call.message, item_type, section=section, call=call, page=1)
         await call.answer()
         return
+    
     if data == "admin":
         # Доступ только администратору
         if not _is_admin_user(call.from_user.id, call.from_user.username):
@@ -236,6 +237,10 @@ async def main_menu_callback(call: CallbackQuery) -> None:
         await call.answer()
         return
 
+    if data == "cart":
+        # Показываем корзину
+        await show_cart(call)
+        return
 
     if data == "donate":
         donate_image = load_texts().get("donate", {}).get("image")
@@ -848,10 +853,12 @@ async def donate_custom_amount(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "menu:cart")
 async def show_cart(call: CallbackQuery) -> None:
+    logger.info(f"Showing cart for user {call.from_user.id}")
     texts = load_texts()
     async with AsyncSessionLocal() as db:
         user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
         if not user:
+            logger.warning(f"User {call.from_user.id} not found in database")
             await call.answer("Пользователь не найден", show_alert=True)
             return
         
@@ -860,7 +867,9 @@ async def show_cart(call: CallbackQuery) -> None:
         )).scalars().all()
         
         if not cart_items_rows:
-            await call.answer("Корзина пуста", show_alert=True)
+            logger.info(f"Cart is empty for user {call.from_user.id}")
+            empty_cart_msg = texts.get("empty", {}).get("cart", "Корзина пуста")
+            await call.answer(empty_cart_msg, show_alert=True)
             return
         
         item_ids = [ci.item_id for ci in cart_items_rows]
@@ -876,6 +885,7 @@ async def show_cart(call: CallbackQuery) -> None:
         
         if unavailable:
             msg = f"⚠️ Товары недоступны: {', '.join(unavailable)}"
+            logger.warning(f"Unavailable items in cart for user {call.from_user.id}: {unavailable}")
             await call.answer(msg, show_alert=True)
         
         total = sum(it.price_minor for it in available_items)
@@ -884,6 +894,8 @@ async def show_cart(call: CallbackQuery) -> None:
         for it in available_items:
             caption += f"• {it.title} — `{it.price_minor/100:.2f}` ₽\n"
         caption += f"\n*Итого:* `{total/100:.2f}` ₽"
+        
+        logger.info(f"Cart displayed for user {call.from_user.id}: {len(available_items)} items, total {total/100:.2f} RUB")
         
         try:
             if call.message.photo:
@@ -898,7 +910,8 @@ async def show_cart(call: CallbackQuery) -> None:
                     parse_mode="Markdown",
                     reply_markup=cart_kb(available_items, total)
                 )
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to display cart for user {call.from_user.id}: {e}")
             await call.message.answer(caption, parse_mode="Markdown", reply_markup=cart_kb(available_items, total))
             with contextlib.suppress(Exception):
                 await call.message.delete()
