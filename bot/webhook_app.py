@@ -4,14 +4,14 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.types import Update
 
 from app.config import settings
-from .handlers import router as handlers_router
+from .handlers import main_router
 
 
 api_router = APIRouter(prefix="/telegram", tags=["telegram"]) 
 
 bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=None))
 dp = Dispatcher()
-dp.include_router(handlers_router)
+dp.include_router(main_router)
 
 
 @api_router.post("/webhook")

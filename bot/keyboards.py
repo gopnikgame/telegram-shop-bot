@@ -185,7 +185,7 @@ def cart_kb(items_in_cart: list, total_price: int) -> InlineKeyboardMarkup:
     kb.append([InlineKeyboardButton(text=texts["buttons"]["back"], callback_data="back:main")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
-def skip_kb(callback_data: str) -> InlineKeyboardMarkup:
+def skip_kb(callback_data: str = "skip_comment") -> InlineKeyboardMarkup:
     """Клавиатура с кнопкой 'Пропустить'"""
     texts = load_texts()
     kb = [
@@ -195,7 +195,7 @@ def skip_kb(callback_data: str) -> InlineKeyboardMarkup:
         )],
         [InlineKeyboardButton(
             text=texts["buttons"]["back"],
-            callback_data="menu:cart"
+            callback_data="back:main"
         )]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
@@ -218,10 +218,3 @@ def offline_delivery_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=texts["buttons"]["back"], callback_data="menu:cart")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
-
-def skip_kb() -> InlineKeyboardMarkup:
-    """Клавиатура с кнопкой 'Пропустить' для комментария"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_comment")],
-        [InlineKeyboardButton(text="« Назад в меню", callback_data="back:main")]
-    ])

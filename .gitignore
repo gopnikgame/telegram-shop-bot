@@ -197,3 +197,5 @@ cython_debug/
 /.vs
 docs/MIGRATION_FIX.md
 docs/QUICK_FIX.md
+bot/handlers.py.OLD
+/telegram-shop

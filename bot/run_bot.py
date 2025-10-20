@@ -4,13 +4,13 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.config import settings
-from .handlers import router
+from .handlers import main_router
 
 
 async def main() -> None:
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=None))
     dp = Dispatcher(storage=MemoryStorage())
-    dp.include_router(router)
+    dp.include_router(main_router)
 
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
