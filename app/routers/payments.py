@@ -20,6 +20,17 @@ def get_bot() -> Bot:
     return global_bot
 
 
+@router.get("/webhook/test")
+async def test_webhook_endpoint() -> dict:
+    """Тестовый endpoint для проверки доступности webhook"""
+    return {
+        "status": "ok",
+        "message": "YooKassa webhook endpoint is accessible",
+        "endpoint": "/payments/yookassa/webhook",
+        "method": "POST"
+    }
+
+
 @router.post("/yookassa/webhook")
 async def yookassa_webhook(
     request: Request,
@@ -27,24 +38,58 @@ async def yookassa_webhook(
     db: AsyncSession = Depends(get_db_session),
     bot: Bot = Depends(get_bot),
 ) -> dict:
-    if not verify_webhook_basic(authorization):
-        raise HTTPException(status_code=401, detail="unauthorized")
+    # ✅ Логируем все входящие запросы
+    logger.bind(event="yk.webhook.received").info("Получен webhook от YooKassa")
+    
+    # Получаем payload
+    try:
+        payload = await request.json()
+        logger.bind(event="yk.webhook.payload").info(
+            "Payload: event={}, status={}", 
+            payload.get("event"), 
+            payload.get("object", {}).get("status")
+        )
+    except Exception as e:
+        logger.bind(event="yk.webhook.error").error("Ошибка парсинга payload: {}", e)
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    
+    # Проверка авторизации (только если настроены credentials)
+    if settings.yk_webhook_user and settings.yk_webhook_password:
+        if not verify_webhook_basic(authorization):
+            logger.bind(event="yk.webhook.auth_failed").warning("Неверная авторизация webhook")
+            raise HTTPException(status_code=401, detail="unauthorized")
+        logger.bind(event="yk.webhook.auth_ok").info("Авторизация webhook успешна")
+    else:
+        logger.bind(event="yk.webhook.auth_skip").info("Авторизация webhook отключена (YK_WEBHOOK_USER не задан)")
 
-    payload = await request.json()
+    # Проверка IP (предупреждение, но не блокировка)
     try:
         peer = request.client.host if request.client else None
-    except Exception:
-        peer = None
-    if peer and not is_trusted_yookassa_ip(peer):
-        logger.bind(event="yk.webhook").info("Webhook ЮKassa от IP вне списка доверенных: {ip}", ip=peer)
+        if peer and not is_trusted_yookassa_ip(peer):
+            logger.bind(event="yk.webhook.untrusted_ip").warning(
+                "Webhook от IP вне списка доверенных: {}", peer
+            )
+    except Exception as e:
+        logger.bind(event="yk.webhook.ip_check_error").warning("Ошибка проверки IP: {}", e)
 
     obj = payload.get("object", {}) if isinstance(payload, dict) else {}
     event = payload.get("event") if isinstance(payload, dict) else None
     metadata = obj.get("metadata", {}) if isinstance(obj, dict) else {}
     status = obj.get("status")
+    
+    logger.bind(event="yk.webhook.event").info(
+        "Обработка события: type={}, status={}, metadata={}", 
+        event, status, metadata
+    )
 
+    # Проверка события и статуса
     if not (event == "payment.succeeded" and status == "succeeded"):
+        logger.bind(event="yk.webhook.skip").info(
+            "Пропускаем событие: event={}, status={}", event, status
+        )
         return {"ok": True}
+    
+    logger.bind(event="yk.webhook.processing").info("✅ Обработка успешной оплаты")
 
     # ========== ДОНАТЫ ==========
     donation_raw = metadata.get("donation")
@@ -54,6 +99,7 @@ async def yookassa_webhook(
     elif isinstance(donation_raw, str):
         donation_flag = donation_raw.strip().lower() in {"true", "1", "yes"}
     if donation_flag:
+        logger.bind(event="yk.webhook.donation").info("Обработка доната")
         if settings.admin_chat_id:
             try:
                 amount_value = (obj.get("amount", {}) or {}).get("value")
@@ -74,8 +120,9 @@ async def yookassa_webhook(
                     buyer_username=(f"@{buyer_username}" if buyer_username else "-"),
                 )
                 await bot.send_message(int(settings.admin_chat_id), text)
-            except Exception:
-                pass
+                logger.bind(event="yk.webhook.donation.sent").info("✅ Уведомление о донате отправлено админу")
+            except Exception as e:
+                logger.bind(event="yk.webhook.donation.error").error("Ошибка отправки уведомления о донате: {}", e)
         return {"ok": True}
 
     # ========== АДМИН-СЧЕТА ==========
@@ -86,6 +133,7 @@ async def yookassa_webhook(
     elif isinstance(admin_invoice_raw, str):
         admin_invoice_flag = admin_invoice_raw.strip().lower() in {"true", "1", "yes"}
     if admin_invoice_flag:
+        logger.bind(event="yk.webhook.admin_invoice").info("Обработка админ-счета")
         if settings.admin_chat_id:
             try:
                 amount_value = (obj.get("amount", {}) or {}).get("value")
@@ -96,22 +144,26 @@ async def yookassa_webhook(
                     f"Описание: {description}"
                 )
                 await bot.send_message(int(settings.admin_chat_id), text)
-            except Exception:
-                pass
+                logger.bind(event="yk.webhook.admin_invoice.sent").info("✅ Уведомление об админ-счете отправлено")
+            except Exception as e:
+                logger.bind(event="yk.webhook.admin_invoice.error").error("Ошибка отправки уведомления об админ-счете: {}", e)
         return {"ok": True}
 
     # ========== ОФФЛАЙН ЗАКАЗЫ (НОВОЕ) ==========
     offline_order_id_raw = metadata.get("offline_order_id")
     if offline_order_id_raw:
+        logger.bind(event="yk.webhook.offline_order").info("Обработка оффлайн заказа #{}", offline_order_id_raw)
         try:
             order = (await db.execute(
                 select(Order).where(Order.id == int(offline_order_id_raw))
             )).scalar_one_or_none()
             
             if not order:
+                logger.bind(event="yk.webhook.offline_order.not_found").error("Оффлайн заказ не найден: {}", offline_order_id_raw)
                 raise HTTPException(status_code=404, detail="offline order not found")
             
             if order.status == OrderStatus.PAID:
+                logger.bind(event="yk.webhook.offline_order.already_paid").info("Заказ уже оплачен")
                 return {"ok": True}
             
             # Получаем все покупки с данными доставки
@@ -209,20 +261,25 @@ async def yookassa_webhook(
     # ========== КОРЗИНА (цифровые товары) ==========
     cart_order_id_raw = metadata.get("cart_order_id")
     if cart_order_id_raw:
+        logger.bind(event="yk.webhook.cart").info("Обработка оплаты корзины, order_id={}", cart_order_id_raw)
         try:
             order = (await db.execute(
                 select(Order).where(Order.id == int(cart_order_id_raw))
             )).scalar_one_or_none()
             
             if not order:
+                logger.bind(event="yk.webhook.cart.not_found").error("Заказ корзины не найден: {}", cart_order_id_raw)
                 raise HTTPException(status_code=404, detail="cart order not found")
             
             if order.status == OrderStatus.PAID:
+                logger.bind(event="yk.webhook.cart.already_paid").info("Корзина уже оплачена")
                 return {"ok": True}
             
             purchases = (await db.execute(
                 select(Purchase).where(Purchase.order_id == order.id)
             )).scalars().all()
+            
+            logger.bind(event="yk.webhook.cart.items").info("Найдено покупок: {}", len(purchases))
             
             # Резервируем коды ДО изменения статуса заказа
             codes_to_deliver = []
@@ -304,6 +361,7 @@ async def yookassa_webhook(
                 except Exception as e:
                     logger.error("Ошибка отправки уведомления админу: {}", e)
             
+            logger.bind(event="yk.webhook.cart.success").info("✅ Корзина успешно обработана, order_id={}", order.id)
             return {"ok": True}
         
         except HTTPException:
@@ -316,7 +374,10 @@ async def yookassa_webhook(
     # ========== ОБЫЧНЫЕ ЗАКАЗЫ (ОДИН ТОВАР) ==========
     payment_id = metadata.get("paymentId")
     if not payment_id:
+        logger.bind(event="yk.webhook.no_payment_id").error("paymentId отсутствует в metadata: {}", metadata)
         raise HTTPException(status_code=400, detail="paymentId missing")
+
+    logger.bind(event="yk.webhook.order").info("Обработка обычного заказа, payment_id={}", payment_id)
 
     try:
         order = (await db.execute(
@@ -324,11 +385,14 @@ async def yookassa_webhook(
         )).scalar_one_or_none()
         
         if not order:
+            logger.bind(event="yk.webhook.order.not_found").error("Заказ не найден: {}", payment_id)
             raise HTTPException(status_code=404, detail="order not found")
 
         if order.status == OrderStatus.PAID:
+            logger.bind(event="yk.webhook.order.already_paid").info("Заказ уже оплачен")
             return {"ok": True}
 
+        logger.bind(event="yk.webhook.order.processing").info("Обновление статуса заказа на PAID")
         order.status = OrderStatus.PAID
 
         item = (await db.execute(
@@ -344,9 +408,11 @@ async def yookassa_webhook(
                 delivery_info=None
             )
             db.add(purchase)
+            logger.bind(event="yk.webhook.order.purchase").info("Создана покупка для товара: {}", item.title)
 
             # ✅ Атомарная резервация кода
             if item.item_type == ItemType.DIGITAL and item.delivery_type == 'codes':
+                logger.bind(event="yk.webhook.order.code").info("Резервация кода для товара: {}", item.title)
                 code_row = (await db.execute(
                     select(ItemCode)
                     .where(ItemCode.item_id == item.id, ItemCode.is_sold == False)
@@ -367,11 +433,14 @@ async def yookassa_webhook(
                 code_row.is_sold = True
                 code_row.sold_order_id = order.id
                 allocated_code = code_row.code
+                logger.bind(event="yk.webhook.order.code.reserved").info("✅ Код зарезервирован")
 
         await db.commit()
+        logger.bind(event="yk.webhook.order.committed").info("✅ Изменения сохранены в БД")
 
         # ✅ Доставка вне транзакции
         if order.buyer_tg_id and item:
+            logger.bind(event="yk.webhook.order.delivery").info("Начинаем доставку товара пользователю {}", order.buyer_tg_id)
             delivery = DeliveryService(bot)
             try:
                 if allocated_code:
@@ -382,7 +451,10 @@ async def yookassa_webhook(
                         reply_markup=None, 
                         parse_mode="HTML"
                     )
+                    logger.bind(event="yk.webhook.order.code.sent").info("✅ Код отправлен пользователю")
+                
                 await delivery.deliver(int(order.buyer_tg_id), item)
+                logger.bind(event="yk.webhook.order.delivery.success").info("✅ Товар успешно доставлен")
             except Exception as e:
                 logger.error(
                     "Ошибка доставки | order_id={} buyer={} error={}",
@@ -391,6 +463,7 @@ async def yookassa_webhook(
 
         # Уведомление админу
         if settings.admin_chat_id:
+            logger.bind(event="yk.webhook.order.notify_admin").info("Отправка уведомления админу")
             try:
                 texts = load_texts().get("notifications", {})
                 template = texts.get("order_paid") or (
@@ -411,9 +484,11 @@ async def yookassa_webhook(
                     order_id=order.id,
                 )
                 await bot.send_message(int(settings.admin_chat_id), text)
+                logger.bind(event="yk.webhook.order.notify_admin.success").info("✅ Уведомление админу отправлено")
             except Exception as e:
                 logger.error("Ошибка отправки уведомления админу: {}", e)
 
+        logger.bind(event="yk.webhook.order.complete").info("✅ Заказ #{} успешно обработан", order.id)
         return {"ok": True}
     
     except HTTPException:
