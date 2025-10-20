@@ -6,6 +6,7 @@ from pathlib import Path
 class Settings(BaseSettings):
     # Telegram
     bot_token: str = Field(alias="BOT_TOKEN")
+    bot_username: str | None = Field(alias="BOT_USERNAME", default=None)  # Username бота без @
 
     # Database
     database_url: str = Field(alias="DATABASE_URL")

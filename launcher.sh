@@ -116,8 +116,30 @@ if [ -d "$INSTALL_DIR" ]; then
         mkdir -p "$BACKUP_DIR"
         
         log "BLUE" "💾 Создание бэкапа конфигурации..."
-        [ -f ".env" ] && cp ".env" "$BACKUP_DIR/" && log "GREEN" "  ✅ .env сохранен"
-        [ -f "app/texts.yml" ] && cp "app/texts.yml" "$BACKUP_DIR/" && log "GREEN" "  ✅ texts.yml сохранен"
+        
+        # Бэкап .env
+        if [ -f ".env" ]; then
+            cp ".env" "$BACKUP_DIR/"
+            log "GREEN" "  ✅ .env сохранен"
+        fi
+        
+        # Бэкап texts.yml
+        if [ -f "app/texts.yml" ]; then
+            cp "app/texts.yml" "$BACKUP_DIR/"
+            log "GREEN" "  ✅ texts.yml сохранен"
+        fi
+        
+        # Бэкап папки static (изображения)
+        if [ -d "static" ]; then
+            cp -r "static" "$BACKUP_DIR/"
+            log "GREEN" "  ✅ static/ сохранен ($(du -sh static 2>/dev/null | cut -f1))"
+        fi
+        
+        # Бэкап папки uploads (загруженные файлы)
+        if [ -d "uploads" ] && [ "$(ls -A uploads 2>/dev/null)" ]; then
+            cp -r "uploads" "$BACKUP_DIR/"
+            log "GREEN" "  ✅ uploads/ сохранен ($(du -sh uploads 2>/dev/null | cut -f1))"
+        fi
         
         # Получаем обновления
         git fetch origin
@@ -157,8 +179,31 @@ if [ -d "$INSTALL_DIR" ]; then
                 
                 # Восстанавливаем конфигурацию
                 log "BLUE" "♻️ Восстановление конфигурации..."
-                [ -f "$BACKUP_DIR/.env" ] && cp "$BACKUP_DIR/.env" ".env" && log "GREEN" "  ✅ .env восстановлен"
-                [ -f "$BACKUP_DIR/texts.yml" ] && cp "$BACKUP_DIR/texts.yml" "app/texts.yml" && log "GREEN" "  ✅ texts.yml восстановлен"
+                
+                # Восстановление .env
+                if [ -f "$BACKUP_DIR/.env" ]; then
+                    cp "$BACKUP_DIR/.env" ".env"
+                    log "GREEN" "  ✅ .env восстановлен"
+                fi
+                
+                # Восстановление texts.yml
+                if [ -f "$BACKUP_DIR/texts.yml" ]; then
+                    cp "$BACKUP_DIR/texts.yml" "app/texts.yml"
+                    log "GREEN" "  ✅ texts.yml восстановлен"
+                fi
+                
+                # Восстановление static (изображения)
+                if [ -d "$BACKUP_DIR/static" ]; then
+                    mkdir -p "static"
+                    cp -r "$BACKUP_DIR/static/"* "static/" 2>/dev/null || true
+                    log "GREEN" "  ✅ static/ восстановлен (изображения)"
+                fi
+                
+                # Восстановление uploads
+                if [ -d "$BACKUP_DIR/uploads" ] && [ "$(ls -A "$BACKUP_DIR/uploads" 2>/dev/null)" ]; then
+                    cp -rn "$BACKUP_DIR/uploads/"* "uploads/" 2>/dev/null || true
+                    log "GREEN" "  ✅ uploads/ восстановлен (загруженные файлы)"
+                fi
                 
                 log "GREEN" "✅ Обновление завершено"
             fi
@@ -171,8 +216,12 @@ if [ -d "$INSTALL_DIR" ]; then
         # Создаем бэкап
         BACKUP_DIR="/opt/$PROJECT_DIR/backups/backup_$(date +%Y%m%d_%H%M%S)"
         mkdir -p "$BACKUP_DIR"
+        
+        log "BLUE" "💾 Создание бэкапа..."
         [ -f ".env" ] && cp ".env" "$BACKUP_DIR/"
         [ -f "app/texts.yml" ] && cp "app/texts.yml" "$BACKUP_DIR/"
+        [ -d "static" ] && cp -r "static" "$BACKUP_DIR/"
+        [ -d "uploads" ] && [ "$(ls -A uploads 2>/dev/null)" ] && cp -r "uploads" "$BACKUP_DIR/"
         
         # Удаляем и клонируем заново
         cd /opt
@@ -181,8 +230,11 @@ if [ -d "$INSTALL_DIR" ]; then
         cd "$INSTALL_DIR"
         
         # Восстанавливаем конфигурацию
+        log "BLUE" "♻️ Восстановление конфигурации..."
         [ -f "$BACKUP_DIR/.env" ] && cp "$BACKUP_DIR/.env" ".env"
         [ -f "$BACKUP_DIR/texts.yml" ] && cp "$BACKUP_DIR/texts.yml" "app/texts.yml"
+        [ -d "$BACKUP_DIR/static" ] && mkdir -p "static" && cp -r "$BACKUP_DIR/static/"* "static/" 2>/dev/null || true
+        [ -d "$BACKUP_DIR/uploads" ] && cp -rn "$BACKUP_DIR/uploads/"* "uploads/" 2>/dev/null || true
     fi
     
     # Добавляем права на выполнение

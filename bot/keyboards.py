@@ -1,4 +1,5 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from typing import List, Set
 
 from app.utils.texts import load_texts
 from app.config import settings
@@ -217,3 +218,10 @@ def offline_delivery_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=texts["buttons"]["back"], callback_data="menu:cart")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
+
+def skip_kb() -> InlineKeyboardMarkup:
+    """Клавиатура с кнопкой 'Пропустить' для комментария"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏭ Пропустить", callback_data="skip_comment")],
+        [InlineKeyboardButton(text="« Назад в меню", callback_data="back:main")]
+    ])

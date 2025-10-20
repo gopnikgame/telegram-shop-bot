@@ -126,53 +126,7 @@ async def yookassa_webhook(
             order.status = OrderStatus.PAID
             await db.commit()
             
-            # Отправляем уведомление администратору с данными доставки
-            if settings.admin_chat_id and purchases:
-                try:
-                    # Получаем товары
-                    item_ids = [p.item_id for p in purchases if p.item_id]
-                    items = (await db.execute(
-                        select(Item).where(Item.id.in_(item_ids))
-                    )).scalars().all()
-                    
-                    items_text = "\n".join([f"• {item.title} - {item.price_minor/100:.2f} ₽" for item in items])
-                    
-                    # Берем данные доставки из первой покупки (они одинаковые для всех товаров в заказе)
-                    first_purchase = purchases[0]
-                    
-                    buyer_username = None
-                    if order.buyer_tg_id:
-                        buyer_username = (await db.execute(
-                            select(User.username).where(User.tg_id == int(order.buyer_tg_id))
-                        )).scalar_one_or_none()
-                    
-                    message = (
-                        f"💳 *ОФФЛАЙН ЗАКАЗ #{order.id} ОПЛАЧЕН*\n\n"
-                        f"*Товары:*\n{items_text}\n\n"
-                        f"*Сумма:* `{order.amount_minor/100:.2f}` ₽\n\n"
-                        f"📦 *Данные доставки:*\n"
-                        f"👤 ФИО: {first_purchase.delivery_fullname or '—'}\n"
-                        f"📞 Телефон: {first_purchase.delivery_phone or '—'}\n"
-                        f"📍 Адрес: {first_purchase.delivery_address or '—'}\n"
-                    )
-                    
-                    if first_purchase.delivery_comment:
-                        message += f"💬 Комментарий: {first_purchase.delivery_comment}\n"
-                    
-                    message += f"\n👥 Покупатель: {order.buyer_tg_id}"
-                    if buyer_username:
-                        message += f" (@{buyer_username})"
-                    
-                    await bot.send_message(
-                        chat_id=int(settings.admin_chat_id),
-                        text=message,
-                        parse_mode="Markdown"
-                    )
-                    logger.info(f"Sent offline order paid notification to admin for order #{order.id}")
-                except Exception as e:
-                    logger.error(f"Failed to send offline order notification: {e}")
-            
-            # Отправляем подтверждение пользователю
+            # Отправляем уведомление пользователю
             if order.buyer_tg_id:
                 try:
                     user_message = (
@@ -189,6 +143,60 @@ async def yookassa_webhook(
                 except Exception as e:
                     logger.error(f"Failed to send confirmation to user: {e}")
             
+            # Отправляем уведомление администратору с данными доставки
+            if settings.admin_chat_id and purchases:
+                try:
+                    # Получаем товары
+                    item_ids = [p.item_id for p in purchases if p.item_id]
+                    items = (await db.execute(
+                        select(Item).where(Item.id.in_(item_ids))
+                    )).scalars().all()
+                    
+                    items_text = "\n".join([f"• {item.title} - {item.price_minor/100:.2f} ₽" for item in items])
+                    
+                    # Берём данные доставки из первой покупки (они одинаковые для всех товаров в заказе)
+                    first_purchase = purchases[0]
+                    
+                    buyer_username = None
+                    if order.buyer_tg_id:
+                        buyer_username = (await db.execute(
+                            select(User.username).where(User.tg_id == int(order.buyer_tg_id))
+                        )).scalar_one_or_none()
+                    
+                    texts = load_texts().get("notifications", {})
+                    template = texts.get("offline_order_paid") or (
+                        "💳 ОФФЛАЙН ЗАКАЗ #{order_id} ОПЛАЧЕН\n\n"
+                        "Товары:\n{items_text}\n\n"
+                        "Сумма: {amount} ₽\n\n"
+                        "📦 Данные доставки:\n"
+                        "👤 ФИО: {fullname}\n"
+                        "📞 Телефон: {phone}\n"
+                        "📍 Адрес: {address}\n"
+                        "💬 Комментарий: {comment}\n\n"
+                        "👥 Покупатель: {buyer} {buyer_username}"
+                    )
+                    
+                    message = template.format(
+                        order_id=order.id,
+                        items_text=items_text,
+                        amount=f"{order.amount_minor/100:.2f}",
+                        fullname=first_purchase.delivery_fullname or "—",
+                        phone=first_purchase.delivery_phone or "—",
+                        address=first_purchase.delivery_address or "—",
+                        comment=first_purchase.delivery_comment or "—",
+                        buyer=order.buyer_tg_id or "-",
+                        buyer_username=(f"@{buyer_username}" if buyer_username else ""),
+                    )
+                    
+                    await bot.send_message(
+                        chat_id=int(settings.admin_chat_id),
+                        text=message,
+                        parse_mode="Markdown"
+                    )
+                    logger.info(f"Sent offline order paid notification to admin for order #{order.id}")
+                except Exception as e:
+                    logger.error(f"Failed to send offline order notification: {e}")
+            
             return {"ok": True}
         
         except HTTPException:
@@ -198,7 +206,7 @@ async def yookassa_webhook(
             await db.rollback()
             raise HTTPException(status_code=500, detail="Internal server error")
 
-    # ========== КОРЗИНА ==========
+    # ========== КОРЗИНА (цифровые товары) ==========
     cart_order_id_raw = metadata.get("cart_order_id")
     if cart_order_id_raw:
         try:
