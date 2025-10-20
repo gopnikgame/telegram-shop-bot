@@ -58,7 +58,7 @@ async def show_cart(call: CallbackQuery) -> None:
         
         if not cart_items_rows:
             logger.info(f"Cart is empty for user {call.from_user.id}")
-            empty_cart_msg = texts.get("empty", {}).get("cart", "Корзина пуста")
+            empty_cart_msg = texts.get("empty", {}).get("cart", "🛒 Корзина пуста")
             await call.answer(empty_cart_msg, show_alert=True)
             return
         
@@ -74,16 +74,16 @@ async def show_cart(call: CallbackQuery) -> None:
                 available_items.append(item)
         
         if unavailable:
-            msg = f"?? Товары недоступны: {', '.join(unavailable)}"
+            msg = f"⚠️ Товары недоступны: {', '.join(unavailable)}"
             logger.warning(f"Unavailable items in cart for user {call.from_user.id}: {unavailable}")
             await call.answer(msg, show_alert=True)
         
         total = sum(it.price_minor for it in available_items)
         
-        caption = "?? *Корзина*\n\n"
+        caption = "🛒 *Корзина*\n\n"
         for it in available_items:
-            caption += f"• {it.title} — `{it.price_minor/100:.2f}` ?\n"
-        caption += f"\n*Итого:* `{total/100:.2f}` ?"
+            caption += f"• {it.title} — `{it.price_minor/100:.2f}` ₽\n"
+        caption += f"\n*Итого:* `{total/100:.2f}` ₽"
         
         logger.info(f"Cart displayed for user {call.from_user.id}: {len(available_items)} items, total {total/100:.2f} RUB")
         
@@ -145,7 +145,7 @@ async def add_to_cart(call: CallbackQuery) -> None:
         db.add(cart_item)
         await db.commit()
     
-    await call.answer("? Добавлено в корзину", show_alert=True)
+    await call.answer("✅ Добавлено в корзину", show_alert=True)
     
     # Обновляем карточку товара
     try:
@@ -162,7 +162,7 @@ async def add_to_cart(call: CallbackQuery) -> None:
             caption = (
                 f"*{item.title}*\n\n"
                 f"{item.description}\n\n"
-                f"?? Цена: `{item.price_minor/100:.2f}` ?"
+                f"💰 Цена: `{item.price_minor/100:.2f}` ₽"
             )
             await call.message.edit_caption(
                 caption=caption,
@@ -190,7 +190,7 @@ async def remove_from_cart(call: CallbackQuery) -> None:
         )
         await db.commit()
     
-    await call.answer("? Удалено из корзины", show_alert=True)
+    await call.answer("✅ Удалено из корзины", show_alert=True)
     
     # Если мы в корзине - обновляем её
     if call.message and call.message.caption and "Корзина" in call.message.caption:
@@ -211,7 +211,7 @@ async def remove_from_cart(call: CallbackQuery) -> None:
                 caption = (
                     f"*{item.title}*\n\n"
                     f"{item.description}\n\n"
-                    f"?? Цена: `{item.price_minor/100:.2f}` ?"
+                    f"💰 Цена: `{item.price_minor/100:.2f}` ₽"
                 )
                 await call.message.edit_caption(
                     caption=caption,
@@ -234,7 +234,7 @@ async def clear_cart(call: CallbackQuery) -> None:
         await db.execute(delete(CartItem).where(CartItem.user_id == user.id))
         await db.commit()
     
-    await call.answer("?? Корзина очищена", show_alert=True)
+    await call.answer("🗑️ Корзина очищена", show_alert=True)
     
     texts = load_texts()
     try:
@@ -296,7 +296,7 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
                 )).scalar_one()
                 
                 if available_codes < 1:
-                    await call.answer(f"? Товар '{item.title}' закончился", show_alert=True)
+                    await call.answer(f"❌ Товар '{item.title}' закончился", show_alert=True)
                     return
         
         total_amount = sum(it.price_minor for it in items)
@@ -311,22 +311,22 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
             texts = load_texts()
             prompt = texts.get("offline_delivery", {}).get("prompts", {}).get(
                 "fullname", 
-                "?? Введите ваше ФИО для доставки:"
+                "📝 Введите ваше ФИО для доставки:"
             )
             
             try:
                 if call.message.photo:
                     await call.message.edit_caption(
                         caption=prompt,
-                        reply_markup=skip_kb("skip_fullname")  # ? ИСПРАВЛЕНО
+                        reply_markup=skip_kb("skip_fullname")
                     )
                 else:
                     await call.message.edit_text(
                         text=prompt,
-                        reply_markup=skip_kb("skip_fullname")  # ? ИСПРАВЛЕНО
+                        reply_markup=skip_kb("skip_fullname")
                     )
             except Exception:
-                await call.message.answer(prompt, reply_markup=skip_kb("skip_fullname"))  # ? ИСПРАВЛЕНО
+                await call.message.answer(prompt, reply_markup=skip_kb("skip_fullname"))
             
             await state.set_state(OfflineDeliveryStates.waiting_for_fullname)
             await call.answer()

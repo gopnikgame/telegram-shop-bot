@@ -35,21 +35,21 @@ async def send_offline_order_to_admin(order_id: int, items: list, delivery_data:
         logger.warning("Admin chat ID not configured, skipping admin notification")
         return
     
-    items_text = "\n".join([f"• {item.title} - {item.price_minor/100:.2f} ?" for item in items])
+    items_text = "\n".join([f"• {item.title} - {item.price_minor/100:.2f} ₽" for item in items])
     total = sum(item.price_minor for item in items)
     
     message = (
-        f"?? *Новый заказ #{order_id}*\n\n"
+        f"📦 *Новый заказ #{order_id}*\n\n"
         f"*Товары:*\n{items_text}\n\n"
-        f"*Итого:* `{total/100:.2f}` ?\n\n"
-        f"?? *Данные доставки:*\n"
-        f"?? ФИО: {delivery_data.get('fullname', '—')}\n"
-        f"?? Телефон: {delivery_data.get('phone', '—')}\n"
-        f"?? Адрес: {delivery_data.get('address', '—')}\n"
+        f"*Итого:* `{total/100:.2f}` ₽\n\n"
+        f"🚚 *Данные доставки:*\n"
+        f"👤 ФИО: {delivery_data.get('fullname', '—')}\n"
+        f"📞 Телефон: {delivery_data.get('phone', '—')}\n"
+        f"📍 Адрес: {delivery_data.get('address', '—')}\n"
     )
     
     if delivery_data.get('comment'):
-        message += f"?? Комментарий: {delivery_data['comment']}\n"
+        message += f"💬 Комментарий: {delivery_data['comment']}\n"
     
     try:
         await bot.send_message(
@@ -87,22 +87,22 @@ async def cb_buy_direct(call: CallbackQuery, state: FSMContext) -> None:
             texts = load_texts()
             prompt = texts.get("offline_delivery", {}).get("prompts", {}).get(
                 "fullname", 
-                "?? Введите ваше ФИО для доставки:"
+                "📝 Введите ваше ФИО для доставки:"
             )
             
             try:
                 if call.message.photo:
                     await call.message.edit_caption(
                         caption=prompt,
-                        reply_markup=skip_kb("skip_fullname")  # ? ИСПРАВЛЕНО
+                        reply_markup=skip_kb("skip_fullname")
                     )
                 else:
                     await call.message.edit_text(
                         text=prompt,
-                        reply_markup=skip_kb("skip_fullname")  # ? ИСПРАВЛЕНО
+                        reply_markup=skip_kb("skip_fullname")
                     )
             except Exception:
-                await call.message.answer(prompt, reply_markup=skip_kb("skip_fullname"))  # ? ИСПРАВЛЕНО
+                await call.message.answer(prompt, reply_markup=skip_kb("skip_fullname"))
             
             await state.set_state(OfflineDeliveryStates.waiting_for_fullname)
             await call.answer()
@@ -135,7 +135,7 @@ async def skip_fullname(call: CallbackQuery, state: FSMContext) -> None:
     texts = load_texts()
     prompt = texts.get("offline_delivery", {}).get("prompts", {}).get(
         "phone",
-        "?? Введите номер телефона для связи:"
+        "📞 Введите номер телефона для связи:"
     )
     
     try:
@@ -155,7 +155,7 @@ async def skip_phone(call: CallbackQuery, state: FSMContext) -> None:
     texts = load_texts()
     prompt = texts.get("offline_delivery", {}).get("prompts", {}).get(
         "address",
-        "?? Введите адрес доставки:"
+        "📍 Введите адрес доставки:"
     )
     
     try:
@@ -175,8 +175,7 @@ async def skip_address(call: CallbackQuery, state: FSMContext) -> None:
     texts = load_texts()
     prompt = texts.get("offline_delivery", {}).get("prompts", {}).get(
         "comment",
-        "?? Введите комментарий к заказу (или нажмите 'Пропустить'):"
-    )
+        "💬 Введите комментарий к заказу (или нажмите 'Пропустить'):")
     
     try:
         await call.message.edit_text(prompt, reply_markup=skip_kb("skip_comment"))
@@ -210,7 +209,7 @@ async def offline_capture_fullname(message: Message, state: FSMContext) -> None:
     fullname = (message.text or "").strip()
     
     if not fullname or len(fullname) < 2:
-        await message.answer("? Пожалуйста, введите корректное ФИО")
+        await message.answer("❌ Пожалуйста, введите корректное ФИО")
         return
     
     await state.update_data(delivery_fullname=fullname)
@@ -218,10 +217,10 @@ async def offline_capture_fullname(message: Message, state: FSMContext) -> None:
     texts = load_texts()
     prompt = texts.get("offline_delivery", {}).get("prompts", {}).get(
         "phone",
-        "?? Введите номер телефона для связи:"
+        "📞 Введите номер телефона для связи:"
     )
     
-    await message.answer(prompt, reply_markup=skip_kb("skip_phone"))  # ? ИСПРАВЛЕНО
+    await message.answer(prompt, reply_markup=skip_kb("skip_phone"))
     await state.set_state(OfflineDeliveryStates.waiting_for_phone)
 
 
@@ -232,7 +231,7 @@ async def offline_capture_phone(message: Message, state: FSMContext) -> None:
     
     phone_digits = ''.join(filter(str.isdigit, phone))
     if len(phone_digits) < 10:
-        await message.answer("? Пожалуйста, введите корректный номер телефона (минимум 10 цифр)")
+        await message.answer("❌ Пожалуйста, введите корректный номер телефона (минимум 10 цифр)")
         return
     
     await state.update_data(delivery_phone=phone)
@@ -240,10 +239,10 @@ async def offline_capture_phone(message: Message, state: FSMContext) -> None:
     texts = load_texts()
     prompt = texts.get("offline_delivery", {}).get("prompts", {}).get(
         "address",
-        "?? Введите адрес доставки:"
+        "📍 Введите адрес доставки:"
     )
     
-    await message.answer(prompt, reply_markup=skip_kb("skip_address"))  # ? ИСПРАВЛЕНО
+    await message.answer(prompt, reply_markup=skip_kb("skip_address"))
     await state.set_state(OfflineDeliveryStates.waiting_for_address)
 
 
@@ -253,7 +252,7 @@ async def offline_capture_address(message: Message, state: FSMContext) -> None:
     address = (message.text or "").strip()
     
     if not address or len(address) < 3:
-        await message.answer("? Пожалуйста, введите корректный адрес доставки")
+        await message.answer("❌ Пожалуйста, введите корректный адрес доставки")
         return
     
     await state.update_data(delivery_address=address)
@@ -261,10 +260,10 @@ async def offline_capture_address(message: Message, state: FSMContext) -> None:
     texts = load_texts()
     prompt = texts.get("offline_delivery", {}).get("prompts", {}).get(
         "comment",
-        "?? Введите комментарий к заказу (или нажмите 'Пропустить'):",
+        "💬 Введите комментарий к заказу (или нажмите 'Пропустить'):",
     )
     
-    await message.answer(prompt, reply_markup=skip_kb("skip_comment"))  # ? ИСПРАВЛЕНО
+    await message.answer(prompt, reply_markup=skip_kb("skip_comment"))
     await state.set_state(OfflineDeliveryStates.waiting_for_comment)
 
 
@@ -362,7 +361,7 @@ async def process_quick_offline_purchase(message: Message, state: FSMContext, da
             
             await db.commit()
             
-            await message.answer("? Данные сохранены. Перейдите к оплате:", reply_markup=payment_link_kb(url))
+            await message.answer("✅ Данные сохранены. Перейдите к оплате:", reply_markup=payment_link_kb(url))
         except Exception as e:
             await db.rollback()
             logger.error(f"Error creating offline order: {e}")
@@ -420,12 +419,13 @@ async def process_cart_offline_purchase(message: Message, state: FSMContext, dat
             
             items = (await db.execute(select(Item).where(Item.id.in_(cart_items)))).scalars().all()
             
+            # ✅ ИСПРАВЛЕНО: используем правильный ключ metadata для оффлайн заказов
             resp = await client.create_payment(
                 amount_minor=total_amount,
                 description=description,
                 payment_id=f"offline_cart:{order.id}",
                 payment_method_type=None,
-                metadata={"offline_order_id": str(order.id), "item_ids": ",".join(str(i.id) for i in items)},
+                metadata={"offline_order_id": str(order.id)},
                 customer_email=f"{message.from_user.id}@{settings.email_domain}",
                 idempotence_key=idem,
             )
@@ -446,7 +446,7 @@ async def process_cart_offline_purchase(message: Message, state: FSMContext, dat
             await db.execute(delete(CartItem).where(CartItem.user_id == user.id))
             await db.commit()
             
-            await message.answer("? Данные сохранены. Перейдите к оплате:", reply_markup=payment_link_kb(url))
+            await message.answer("✅ Данные сохранены. Перейдите к оплате:", reply_markup=payment_link_kb(url))
         except Exception as e:
             await db.rollback()
             logger.error(f"Error creating cart offline order: {e}")
