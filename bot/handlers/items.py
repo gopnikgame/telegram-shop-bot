@@ -1,5 +1,5 @@
 """
-Обработчики просмотра товаров и карточек
+РћР±СЂР°Р±РѕС‚С‡РёРєРё РїСЂРѕСЃРјРѕС‚СЂР° С‚РѕРІР°СЂРѕРІ Рё РєР°СЂС‚РѕС‡РµРє
 """
 import logging
 from pathlib import Path
@@ -25,7 +25,7 @@ router = Router()
 
 
 async def list_items(message: Message, item_type: ItemType, section: str = None, call: CallbackQuery = None, page: int = 1, page_size: int = 5) -> None:
-    """Отображение списка товаров"""
+    """РћС‚РѕР±СЂР°Р¶РµРЅРёРµ СЃРїРёСЃРєР° С‚РѕРІР°СЂРѕРІ"""
     texts = load_texts()
     
     async with AsyncSessionLocal() as db:
@@ -54,7 +54,7 @@ async def list_items(message: Message, item_type: ItemType, section: str = None,
             ItemType.OFFLINE: "products",
             ItemType.SERVICE: "service",
         }.get(item_type, "items")
-        empty_text = texts.get("empty", {}).get(empty_key, "Товаров пока-что нет, но вы держитесь!")
+        empty_text = texts.get("empty", {}).get(empty_key, "РўРѕРІР°СЂРѕРІ РїРѕРєР°-С‡С‚Рѕ РЅРµС‚, РЅРѕ РІС‹ РґРµСЂР¶РёС‚РµСЃСЊ!")
         
         if call:
             await call.answer(empty_text, show_alert=True)
@@ -71,7 +71,7 @@ async def list_items(message: Message, item_type: ItemType, section: str = None,
         }
         section = section_mapping.get(item_type)
     
-    description = texts["main_menu"]["section_descriptions"].get(section, "Список")
+    description = texts["main_menu"]["section_descriptions"].get(section, "РЎРїРёСЃРѕРє")
     image_path = texts["main_menu"].get("images", {}).get(section)
     
     try:
@@ -85,8 +85,8 @@ async def list_items(message: Message, item_type: ItemType, section: str = None,
                     )
                 except TelegramBadRequest as e:
                     if "message is not modified" not in str(e):
-                        logger.error(f"Ошибка редактирования: {e}")
-                        await call.answer("Произошла ошибка", show_alert=True)
+                        logger.error(f"РћС€РёР±РєР° СЂРµРґР°РєС‚РёСЂРѕРІР°РЅРёСЏ: {e}")
+                        await call.answer("РџСЂРѕРёР·РѕС€Р»Р° РѕС€РёР±РєР°", show_alert=True)
             else:
                 try:
                     await call.message.edit_text(
@@ -122,7 +122,7 @@ async def list_items(message: Message, item_type: ItemType, section: str = None,
 
 @router.callback_query(F.data.startswith("list:"))
 async def list_pagination(call: CallbackQuery) -> None:
-    """Пагинация списков товаров"""
+    """РџР°РіРёРЅР°С†РёСЏ СЃРїРёСЃРєРѕРІ С‚РѕРІР°СЂРѕРІ"""
     try:
         _, type_str, page_str = call.data.split(":", 2)
         page_num = int(page_str) if page_str.isdigit() else 1
@@ -144,13 +144,13 @@ async def list_pagination(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("item:"))
 async def show_item(call: CallbackQuery) -> None:
-    """Отображение карточки товара"""
+    """РћС‚РѕР±СЂР°Р¶РµРЅРёРµ РєР°СЂС‚РѕС‡РєРё С‚РѕРІР°СЂР°"""
     parts = call.data.split(":")
     item_id = parts[1]
     item_type = parts[2] if len(parts) > 2 else None
     page_from = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 1
     
-    logger.info("Карточка товара: callback получен, item_id=%s, type=%s", item_id, item_type)
+    logger.info("РљР°СЂС‚РѕС‡РєР° С‚РѕРІР°СЂР°: callback РїРѕР»СѓС‡РµРЅ, item_id=%s, type=%s", item_id, item_type)
     
     async with AsyncSessionLocal() as db:
         item = (await db.execute(select(Item).where(Item.id == int(item_id)))).scalar_one_or_none()
@@ -171,17 +171,17 @@ async def show_item(call: CallbackQuery) -> None:
             in_cart = False
         
         if not item:
-            logger.error(f"Товар не найден: id={item_id}")
-            await call.answer(f"Товар не найден: id={item_id}", show_alert=True)
+            logger.error(f"РўРѕРІР°СЂ РЅРµ РЅР°Р№РґРµРЅ: id={item_id}")
+            await call.answer(f"РўРѕРІР°СЂ РЅРµ РЅР°Р№РґРµРЅ: id={item_id}", show_alert=True)
             return
         
         caption = (
             f"*{item.title}*\n\n"
             f"{item.description}\n\n"
-            f"?? Цена: `{item.price_minor/100:.2f}` ?"
+            f"?? Р¦РµРЅР°: `{item.price_minor/100:.2f}` ?"
         )
         
-        logger.info("Показываем карточку: %s (id=%s, type=%s)", item.title, item.id, item.item_type)
+        logger.info("РџРѕРєР°Р·С‹РІР°РµРј РєР°СЂС‚РѕС‡РєСѓ: %s (id=%s, type=%s)", item.title, item.id, item.item_type)
         
         try:
             if call.message.photo:
@@ -206,13 +206,13 @@ async def show_item(call: CallbackQuery) -> None:
                 if media_source:
                     await call.message.edit_media(
                         media=InputMediaPhoto(media=media_source, caption=caption, parse_mode="Markdown"),
-                        reply_markup=item_card_kb(item.id, item_type, purchased, from_purchased=(call.message.caption and "Ваши купленные проекты:" in call.message.caption), page=page_from, in_cart=in_cart)
+                        reply_markup=item_card_kb(item.id, item_type, purchased, from_purchased=(call.message.caption and "Р’Р°С€Рё РєСѓРїР»РµРЅРЅС‹Рµ РїСЂРѕРµРєС‚С‹:" in call.message.caption), page=page_from, in_cart=in_cart)
                     )
                 else:
                     await call.message.edit_caption(
                         caption=caption,
                         parse_mode="Markdown",
-                        reply_markup=item_card_kb(item.id, item_type, purchased, from_purchased=(call.message.caption and "Ваши купленные проекты:" in call.message.caption), page=page_from, in_cart=in_cart)
+                        reply_markup=item_card_kb(item.id, item_type, purchased, from_purchased=(call.message.caption and "Р’Р°С€Рё РєСѓРїР»РµРЅРЅС‹Рµ РїСЂРѕРµРєС‚С‹:" in call.message.caption), page=page_from, in_cart=in_cart)
                     )
             else:
                 await call.message.edit_text(
@@ -221,14 +221,14 @@ async def show_item(call: CallbackQuery) -> None:
                     reply_markup=item_card_kb(item.id, item_type, purchased, from_purchased=False, page=page_from, in_cart=in_cart)
                 )
         except Exception as e:
-            logger.error(f"Ошибка при показе карточки товара: {e}")
-            await call.answer("Ошибка при показе карточки товара", show_alert=True)
+            logger.error(f"РћС€РёР±РєР° РїСЂРё РїРѕРєР°Р·Рµ РєР°СЂС‚РѕС‡РєРё С‚РѕРІР°СЂР°: {e}")
+            await call.answer("РћС€РёР±РєР° РїСЂРё РїРѕРєР°Р·Рµ РєР°СЂС‚РѕС‡РєРё С‚РѕРІР°СЂР°", show_alert=True)
         await call.answer()
 
 
 @router.callback_query(F.data.startswith("buy:"))
 async def cb_buy(call: CallbackQuery) -> None:
-    """Обработчик кнопки 'Купить'"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РєРЅРѕРїРєРё 'РљСѓРїРёС‚СЊ'"""
     _, item_id = call.data.split(":", 1)
     await call.message.edit_reply_markup(reply_markup=payment_method_kb(int(item_id)))
     await call.answer()
@@ -236,7 +236,7 @@ async def cb_buy(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("buy_one:"))
 async def cb_buy_one(call: CallbackQuery) -> None:
-    """Быстрая покупка одного товара"""
+    """Р‘С‹СЃС‚СЂР°СЏ РїРѕРєСѓРїРєР° РѕРґРЅРѕРіРѕ С‚РѕРІР°СЂР°"""
     _, item_id = call.data.split(":")
     item_id_int = int(item_id)
     
@@ -248,19 +248,19 @@ async def cb_buy_one(call: CallbackQuery) -> None:
             except Exception:
                 try:
                     if call.message.photo:
-                        await call.message.edit_caption(caption="Перейдите к оплате:", reply_markup=payment_link_kb(url))
+                        await call.message.edit_caption(caption="РџРµСЂРµР№РґРёС‚Рµ Рє РѕРїР»Р°С‚Рµ:", reply_markup=payment_link_kb(url))
                     else:
-                        await call.message.edit_text("Перейдите к оплате:", reply_markup=payment_link_kb(url))
+                        await call.message.edit_text("РџРµСЂРµР№РґРёС‚Рµ Рє РѕРїР»Р°С‚Рµ:", reply_markup=payment_link_kb(url))
                 except Exception:
-                    await call.message.answer("Ссылка на оплату:", reply_markup=payment_link_kb(url))
+                    await call.message.answer("РЎСЃС‹Р»РєР° РЅР° РѕРїР»Р°С‚Сѓ:", reply_markup=payment_link_kb(url))
         except Exception:
-            await call.message.answer("Не удалось создать заказ. Попробуйте позже.")
+            await call.message.answer("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ Р·Р°РєР°Р·. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.")
     await call.answer()
 
 
 @router.message(StateFilter(None))
 async def fallback_message(message: Message) -> None:
-    """Обработчик неизвестных сообщений"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РЅРµРёР·РІРµСЃС‚РЅС‹С… СЃРѕРѕР±С‰РµРЅРёР№"""
     texts = load_texts()
-    text = texts.get("fallback", {}).get("text") or "Я пока не умею отвечать на такие сообщения."
+    text = texts.get("fallback", {}).get("text") or "РЇ РїРѕРєР° РЅРµ СѓРјРµСЋ РѕС‚РІРµС‡Р°С‚СЊ РЅР° С‚Р°РєРёРµ СЃРѕРѕР±С‰РµРЅРёСЏ."
     await message.answer(text, reply_markup=main_menu_only_kb())

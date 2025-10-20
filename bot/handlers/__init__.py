@@ -1,9 +1,9 @@
 """
-Обработчики событий Telegram бота
+СњР±СЂР°Р±РѕС‚С‡РёРєРё СЃРѕР±С‹С‚РёР№ Telegram Р±РѕС‚Р°
 """
 from aiogram import Router
 
-# Импортируем все роутеры
+# В»РјРїРѕСЂС‚РёСЂСѓРµРј РІСЃРµ СЂРѕСѓС‚РµСЂС‹
 from .start import router as start_router
 from .menu import router as menu_router
 from .items import router as items_router
@@ -12,10 +12,10 @@ from .delivery import router as delivery_router
 from .donate import router as donate_router
 from .admin import router as admin_router
 
-# Главный роутер, объединяющий все модули
+# в€љР»Р°РІРЅС‹Р№ СЂРѕСѓС‚РµСЂ, РѕР±СЉРµРґРёРЅВ¤СЋС‰РёР№ РІСЃРµ РјРѕРґСѓР»Рё
 main_router = Router()
 
-# Подключаем роутеры в правильном порядке (важно для приоритета обработки)
+# С•РѕРґРєР»СЋС‡Р°РµРј СЂРѕСѓС‚РµСЂС‹ РІ РїСЂР°РІРёР»СЊРЅРѕРј РїРѕСЂВ¤РґРєРµ (РІР°Р¶РЅРѕ РґР»В¤ РїСЂРёРѕСЂРёС‚РµС‚Р° РѕР±СЂР°Р±РѕС‚РєРё)
 main_router.include_router(start_router)
 main_router.include_router(admin_router)
 main_router.include_router(menu_router)

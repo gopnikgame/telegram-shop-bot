@@ -1,5 +1,5 @@
 """
-Обработчики главного меню и навигации
+РћР±СЂР°Р±РѕС‚С‡РёРєРё РіР»Р°РІРЅРѕРіРѕ РјРµРЅСЋ Рё РЅР°РІРёРіР°С†РёРё
 """
 import logging
 import contextlib
@@ -20,7 +20,7 @@ router = Router()
 
 
 def _is_admin_user(tg_id: int | None, username: str | None) -> bool:
-    """Проверка является ли пользователь администратором"""
+    """РџСЂРѕРІРµСЂРєР° СЏРІР»СЏРµС‚СЃСЏ Р»Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂРѕРј"""
     try:
         if settings.admin_chat_id and tg_id is not None:
             if str(tg_id) == str(settings.admin_chat_id):
@@ -34,14 +34,14 @@ def _is_admin_user(tg_id: int | None, username: str | None) -> bool:
 
 @router.callback_query(F.data.startswith("menu:"))
 async def main_menu_callback(call: CallbackQuery) -> None:
-    """Обработчик inline-кнопок главного меню"""
-    from .items import list_items  # Локальный импорт
+    """РћР±СЂР°Р±РѕС‚С‡РёРє inline-РєРЅРѕРїРѕРє РіР»Р°РІРЅРѕРіРѕ РјРµРЅСЋ"""
+    from .items import list_items  # Р›РѕРєР°Р»СЊРЅС‹Р№ РёРјРїРѕСЂС‚
     from .cart import show_cart
     
     texts = load_texts()
     data = call.data.split(":", 1)[1]
 
-    # Маппинг для определения типа элементов и секции
+    # РњР°РїРїРёРЅРі РґР»СЏ РѕРїСЂРµРґРµР»РµРЅРёСЏ С‚РёРїР° СЌР»РµРјРµРЅС‚РѕРІ Рё СЃРµРєС†РёРё
     section_mapping = {
         "projects": (ItemType.DIGITAL, "projects"),
         "products": (ItemType.OFFLINE, "products"),
@@ -55,12 +55,12 @@ async def main_menu_callback(call: CallbackQuery) -> None:
         return
     
     if data == "admin":
-        # Доступ только администратору
+        # Р”РѕСЃС‚СѓРї С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ
         if not _is_admin_user(call.from_user.id, call.from_user.username):
-            await call.answer("Недоступно", show_alert=True)
+            await call.answer("РќРµРґРѕСЃС‚СѓРїРЅРѕ", show_alert=True)
             return
         
-        admin_text = load_texts().get("admin", {}).get("title", "Администрирование")
+        admin_text = load_texts().get("admin", {}).get("title", "РђРґРјРёРЅРёСЃС‚СЂРёСЂРѕРІР°РЅРёРµ")
         try:
             if call.message.photo:
                 await call.message.edit_caption(caption=admin_text, reply_markup=admin_menu_kb())
@@ -85,20 +85,20 @@ async def main_menu_callback(call: CallbackQuery) -> None:
                 if image_exists:
                     photo = FSInputFile(donate_image)
                     await call.message.edit_media(
-                        media=InputMediaPhoto(media=photo, caption="Выберите сумму доната:"),
+                        media=InputMediaPhoto(media=photo, caption="Р’С‹Р±РµСЂРёС‚Рµ СЃСѓРјРјСѓ РґРѕРЅР°С‚Р°:"),
                         reply_markup=donate_amounts_kb()
                     )
                 else:
-                    await call.message.edit_caption(caption="Выберите сумму доната:", reply_markup=donate_amounts_kb())
+                    await call.message.edit_caption(caption="Р’С‹Р±РµСЂРёС‚Рµ СЃСѓРјРјСѓ РґРѕРЅР°С‚Р°:", reply_markup=donate_amounts_kb())
             else:
                 if image_exists:
                     photo = FSInputFile(donate_image)
-                    await call.message.answer_photo(photo=photo, caption="Выберите сумму доната:", reply_markup=donate_amounts_kb())
+                    await call.message.answer_photo(photo=photo, caption="Р’С‹Р±РµСЂРёС‚Рµ СЃСѓРјРјСѓ РґРѕРЅР°С‚Р°:", reply_markup=donate_amounts_kb())
                     await call.message.delete()
                 else:
-                    await call.message.edit_text(text="Выберите сумму доната:", reply_markup=donate_amounts_kb())
+                    await call.message.edit_text(text="Р’С‹Р±РµСЂРёС‚Рµ СЃСѓРјРјСѓ РґРѕРЅР°С‚Р°:", reply_markup=donate_amounts_kb())
         except Exception:
-            await call.message.answer(text="Выберите сумму доната:", reply_markup=donate_amounts_kb())
+            await call.message.answer(text="Р’С‹Р±РµСЂРёС‚Рµ СЃСѓРјРјСѓ РґРѕРЅР°С‚Р°:", reply_markup=donate_amounts_kb())
             with contextlib.suppress(Exception):
                 await call.message.delete()
         await call.answer()
@@ -107,7 +107,7 @@ async def main_menu_callback(call: CallbackQuery) -> None:
     if data == "purchased":
         async with AsyncSessionLocal() as db:
             user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
-            empty_text = texts.get("empty", {}).get("purchased", "У вас нет купленных проектов.")
+            empty_text = texts.get("empty", {}).get("purchased", "РЈ РІР°СЃ РЅРµС‚ РєСѓРїР»РµРЅРЅС‹С… РїСЂРѕРµРєС‚РѕРІ.")
             if not user:
                 await call.answer(empty_text, show_alert=True)
                 return
@@ -125,7 +125,7 @@ async def main_menu_callback(call: CallbackQuery) -> None:
                 kb.append([InlineKeyboardButton(text=item.title, callback_data=f"item:{item.id}:{item.item_type.value}")])
             kb.append([InlineKeyboardButton(text=texts["buttons"]["back"], callback_data="back:main")])
 
-            title = texts["main_menu"].get("purchased_title", "Ваши купленные проекты:")
+            title = texts["main_menu"].get("purchased_title", "Р’Р°С€Рё РєСѓРїР»РµРЅРЅС‹Рµ РїСЂРѕРµРєС‚С‹:")
             image_path = texts["main_menu"].get("images", {}).get("purchased")
             
             try:
@@ -155,8 +155,8 @@ async def main_menu_callback(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("back:"))
 async def cb_back(call: CallbackQuery) -> None:
-    """Обработчик кнопки 'Назад'"""
-    from .items import list_items  # Локальный импорт
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РєРЅРѕРїРєРё 'РќР°Р·Р°Рґ'"""
+    from .items import list_items  # Р›РѕРєР°Р»СЊРЅС‹Р№ РёРјРїРѕСЂС‚
     
     parts = call.data.split(":")
     action = parts[1]
@@ -182,7 +182,7 @@ async def cb_back(call: CallbackQuery) -> None:
     if action == "purchased":
         async with AsyncSessionLocal() as db:
             user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
-            empty_text = texts.get("empty", {}).get("purchased", "У вас нет купленных проектов.")
+            empty_text = texts.get("empty", {}).get("purchased", "РЈ РІР°СЃ РЅРµС‚ РєСѓРїР»РµРЅРЅС‹С… РїСЂРѕРµРєС‚РѕРІ.")
             if not user:
                 await call.answer(empty_text, show_alert=True)
                 return
@@ -200,7 +200,7 @@ async def cb_back(call: CallbackQuery) -> None:
                 kb.append([InlineKeyboardButton(text=item.title, callback_data=f"item:{item.id}:{item.item_type.value}")])
             kb.append([InlineKeyboardButton(text=texts["buttons"]["back"], callback_data="back:main")])
 
-            title = texts["main_menu"].get("purchased_title", "Ваши купленные проекты:")
+            title = texts["main_menu"].get("purchased_title", "Р’Р°С€Рё РєСѓРїР»РµРЅРЅС‹Рµ РїСЂРѕРµРєС‚С‹:")
             image_path = texts["main_menu"].get("images", {}).get("purchased")
             
             try:
@@ -227,7 +227,7 @@ async def cb_back(call: CallbackQuery) -> None:
             await call.answer()
         return
     
-    # Возврат в главное меню - получаем счетчик корзины
+    # Р’РѕР·РІСЂР°С‚ РІ РіР»Р°РІРЅРѕРµ РјРµРЅСЋ - РїРѕР»СѓС‡Р°РµРј СЃС‡РµС‚С‡РёРє РєРѕСЂР·РёРЅС‹
     async with AsyncSessionLocal() as db:
         user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
         cart_count = 0

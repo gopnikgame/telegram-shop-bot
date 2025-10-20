@@ -1,15 +1,5 @@
 """
-Модуль корзины покупок
-
-ИНСТРУКЦИЯ ПО ЗАПОЛНЕНИЮ:
-Перенесите сюда из bot/handlers.py следующие функции и обработчики:
-1. show_cart (обработчик menu:cart)
-2. add_to_cart (обработчик cart:add:)
-3. remove_from_cart (обработчик cart:remove:)
-4. clear_cart (обработчик cart:clear)
-5. checkout_cart (обработчик cart:checkout) - с исправлением skip_kb("skip_fullname")
-
-Все импорты должны остаться те же + добавить skip_kb в импорты из keyboards
+РњРѕРґСѓР»СЊ РєРѕСЂР·РёРЅС‹ РїРѕРєСѓРїРѕРє
 """
 import logging
 import contextlib
@@ -32,7 +22,7 @@ router = Router()
 
 
 def _is_admin_user(tg_id: int | None, username: str | None) -> bool:
-    """Проверка является ли пользователь администратором"""
+    """РџСЂРѕРІРµСЂРєР° СЏРІР»СЏРµС‚СЃСЏ Р»Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂРѕРј"""
     try:
         if settings.admin_chat_id and tg_id is not None:
             if str(tg_id) == str(settings.admin_chat_id):
@@ -45,13 +35,13 @@ def _is_admin_user(tg_id: int | None, username: str | None) -> bool:
 
 
 async def has_offline_items(items: list) -> bool:
-    """Проверка наличия оффлайн товаров в списке"""
+    """РџСЂРѕРІРµСЂРєР° РЅР°Р»РёС‡РёСЏ РѕС„С„Р»Р°Р№РЅ С‚РѕРІР°СЂРѕРІ РІ СЃРїРёСЃРєРµ"""
     return any(item.item_type == ItemType.OFFLINE for item in items)
 
 
 @router.callback_query(F.data == "menu:cart")
 async def show_cart(call: CallbackQuery) -> None:
-    """Отображение корзины"""
+    """РћС‚РѕР±СЂР°Р¶РµРЅРёРµ РєРѕСЂР·РёРЅС‹"""
     logger.info(f"Showing cart for user {call.from_user.id}")
     texts = load_texts()
     
@@ -59,7 +49,7 @@ async def show_cart(call: CallbackQuery) -> None:
         user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
         if not user:
             logger.warning(f"User {call.from_user.id} not found in database")
-            await call.answer("Пользователь не найден", show_alert=True)
+            await call.answer("РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ", show_alert=True)
             return
         
         cart_items_rows = (await db.execute(
@@ -68,7 +58,7 @@ async def show_cart(call: CallbackQuery) -> None:
         
         if not cart_items_rows:
             logger.info(f"Cart is empty for user {call.from_user.id}")
-            empty_cart_msg = texts.get("empty", {}).get("cart", "Корзина пуста")
+            empty_cart_msg = texts.get("empty", {}).get("cart", "РљРѕСЂР·РёРЅР° РїСѓСЃС‚Р°")
             await call.answer(empty_cart_msg, show_alert=True)
             return
         
@@ -84,16 +74,16 @@ async def show_cart(call: CallbackQuery) -> None:
                 available_items.append(item)
         
         if unavailable:
-            msg = f"?? Товары недоступны: {', '.join(unavailable)}"
+            msg = f"?? РўРѕРІР°СЂС‹ РЅРµРґРѕСЃС‚СѓРїРЅС‹: {', '.join(unavailable)}"
             logger.warning(f"Unavailable items in cart for user {call.from_user.id}: {unavailable}")
             await call.answer(msg, show_alert=True)
         
         total = sum(it.price_minor for it in available_items)
         
-        caption = "?? *Корзина*\n\n"
+        caption = "?? *РљРѕСЂР·РёРЅР°*\n\n"
         for it in available_items:
-            caption += f"• {it.title} — `{it.price_minor/100:.2f}` ?\n"
-        caption += f"\n*Итого:* `{total/100:.2f}` ?"
+            caption += f"вЂў {it.title} вЂ” `{it.price_minor/100:.2f}` ?\n"
+        caption += f"\n*РС‚РѕРіРѕ:* `{total/100:.2f}` ?"
         
         logger.info(f"Cart displayed for user {call.from_user.id}: {len(available_items)} items, total {total/100:.2f} RUB")
         
@@ -120,19 +110,19 @@ async def show_cart(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("cart:add:"))
 async def add_to_cart(call: CallbackQuery) -> None:
-    """Добавление товара в корзину"""
+    """Р”РѕР±Р°РІР»РµРЅРёРµ С‚РѕРІР°СЂР° РІ РєРѕСЂР·РёРЅСѓ"""
     _, _, item_id = call.data.split(":")
     item_id_int = int(item_id)
     
     async with AsyncSessionLocal() as db:
         user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
         if not user:
-            await call.answer("Пользователь не найден", show_alert=True)
+            await call.answer("РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ", show_alert=True)
             return
         
         item = (await db.execute(select(Item).where(Item.id == item_id_int))).scalar_one_or_none()
         if not item:
-            await call.answer("Товар не найден", show_alert=True)
+            await call.answer("РўРѕРІР°СЂ РЅРµ РЅР°Р№РґРµРЅ", show_alert=True)
             return
         
         purchased = (await db.execute(
@@ -140,7 +130,7 @@ async def add_to_cart(call: CallbackQuery) -> None:
         )).first() is not None
         
         if purchased and item.item_type == ItemType.DIGITAL:
-            await call.answer("Вы уже купили этот товар", show_alert=True)
+            await call.answer("Р’С‹ СѓР¶Рµ РєСѓРїРёР»Рё СЌС‚РѕС‚ С‚РѕРІР°СЂ", show_alert=True)
             return
         
         existing = (await db.execute(
@@ -148,16 +138,16 @@ async def add_to_cart(call: CallbackQuery) -> None:
         )).scalar_one_or_none()
         
         if existing:
-            await call.answer("Товар уже в корзине", show_alert=True)
+            await call.answer("РўРѕРІР°СЂ СѓР¶Рµ РІ РєРѕСЂР·РёРЅРµ", show_alert=True)
             return
         
         cart_item = CartItem(user_id=user.id, item_id=item_id_int)
         db.add(cart_item)
         await db.commit()
     
-    await call.answer("? Добавлено в корзину", show_alert=True)
+    await call.answer("? Р”РѕР±Р°РІР»РµРЅРѕ РІ РєРѕСЂР·РёРЅСѓ", show_alert=True)
     
-    # Обновляем карточку товара
+    # РћР±РЅРѕРІР»СЏРµРј РєР°СЂС‚РѕС‡РєСѓ С‚РѕРІР°СЂР°
     try:
         async with AsyncSessionLocal() as db:
             item = (await db.execute(select(Item).where(Item.id == item_id_int))).scalar_one_or_none()
@@ -172,7 +162,7 @@ async def add_to_cart(call: CallbackQuery) -> None:
             caption = (
                 f"*{item.title}*\n\n"
                 f"{item.description}\n\n"
-                f"?? Цена: `{item.price_minor/100:.2f}` ?"
+                f"?? Р¦РµРЅР°: `{item.price_minor/100:.2f}` ?"
             )
             await call.message.edit_caption(
                 caption=caption,
@@ -185,14 +175,14 @@ async def add_to_cart(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("cart:remove:"))
 async def remove_from_cart(call: CallbackQuery) -> None:
-    """Удаление товара из корзины"""
+    """РЈРґР°Р»РµРЅРёРµ С‚РѕРІР°СЂР° РёР· РєРѕСЂР·РёРЅС‹"""
     _, _, item_id = call.data.split(":")
     item_id_int = int(item_id)
     
     async with AsyncSessionLocal() as db:
         user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
         if not user:
-            await call.answer("Пользователь не найден", show_alert=True)
+            await call.answer("РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ", show_alert=True)
             return
         
         await db.execute(
@@ -200,13 +190,13 @@ async def remove_from_cart(call: CallbackQuery) -> None:
         )
         await db.commit()
     
-    await call.answer("? Удалено из корзины", show_alert=True)
+    await call.answer("? РЈРґР°Р»РµРЅРѕ РёР· РєРѕСЂР·РёРЅС‹", show_alert=True)
     
-    # Если мы в корзине - обновляем её
-    if call.message and call.message.caption and "Корзина" in call.message.caption:
+    # Р•СЃР»Рё РјС‹ РІ РєРѕСЂР·РёРЅРµ - РѕР±РЅРѕРІР»СЏРµРј РµС‘
+    if call.message and call.message.caption and "РљРѕСЂР·РёРЅР°" in call.message.caption:
         await show_cart(call)
     else:
-        # Если в карточке товара - обновляем карточку
+        # Р•СЃР»Рё РІ РєР°СЂС‚РѕС‡РєРµ С‚РѕРІР°СЂР° - РѕР±РЅРѕРІР»СЏРµРј РєР°СЂС‚РѕС‡РєСѓ
         try:
             async with AsyncSessionLocal() as db:
                 item = (await db.execute(select(Item).where(Item.id == item_id_int))).scalar_one_or_none()
@@ -221,7 +211,7 @@ async def remove_from_cart(call: CallbackQuery) -> None:
                 caption = (
                     f"*{item.title}*\n\n"
                     f"{item.description}\n\n"
-                    f"?? Цена: `{item.price_minor/100:.2f}` ?"
+                    f"?? Р¦РµРЅР°: `{item.price_minor/100:.2f}` ?"
                 )
                 await call.message.edit_caption(
                     caption=caption,
@@ -234,17 +224,17 @@ async def remove_from_cart(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "cart:clear")
 async def clear_cart(call: CallbackQuery) -> None:
-    """Очистка корзины"""
+    """РћС‡РёСЃС‚РєР° РєРѕСЂР·РёРЅС‹"""
     async with AsyncSessionLocal() as db:
         user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
         if not user:
-            await call.answer("Пользователь не найден", show_alert=True)
+            await call.answer("РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ", show_alert=True)
             return
         
         await db.execute(delete(CartItem).where(CartItem.user_id == user.id))
         await db.commit()
     
-    await call.answer("?? Корзина очищена", show_alert=True)
+    await call.answer("?? РљРѕСЂР·РёРЅР° РѕС‡РёС‰РµРЅР°", show_alert=True)
     
     texts = load_texts()
     try:
@@ -270,14 +260,14 @@ async def clear_cart(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "cart:checkout")
 async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
-    """Оформление заказа из корзины"""
-    # Импортируем OfflineDeliveryStates локально чтобы избежать циклических импортов
+    """РћС„РѕСЂРјР»РµРЅРёРµ Р·Р°РєР°Р·Р° РёР· РєРѕСЂР·РёРЅС‹"""
+    # РРјРїРѕСЂС‚РёСЂСѓРµРј OfflineDeliveryStates Р»РѕРєР°Р»СЊРЅРѕ С‡С‚РѕР±С‹ РёР·Р±РµР¶Р°С‚СЊ С†РёРєР»РёС‡РµСЃРєРёС… РёРјРїРѕСЂС‚РѕРІ
     from .delivery import OfflineDeliveryStates
     
     async with AsyncSessionLocal() as db:
         user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
         if not user:
-            await call.answer("Пользователь не найден", show_alert=True)
+            await call.answer("РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ", show_alert=True)
             return
         
         cart_items_rows = (await db.execute(
@@ -285,17 +275,17 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
         )).scalars().all()
         
         if not cart_items_rows:
-            await call.answer("Корзина пуста", show_alert=True)
+            await call.answer("РљРѕСЂР·РёРЅР° РїСѓСЃС‚Р°", show_alert=True)
             return
         
         item_ids = [ci.item_id for ci in cart_items_rows]
         items = (await db.execute(select(Item).where(Item.id.in_(item_ids), Item.is_visible == True))).scalars().all()
         
         if not items:
-            await call.answer("Нет доступных товаров для оплаты", show_alert=True)
+            await call.answer("РќРµС‚ РґРѕСЃС‚СѓРїРЅС‹С… С‚РѕРІР°СЂРѕРІ РґР»СЏ РѕРїР»Р°С‚С‹", show_alert=True)
             return
         
-        # Проверка наличия кодов для цифровых товаров
+        # РџСЂРѕРІРµСЂРєР° РЅР°Р»РёС‡РёСЏ РєРѕРґРѕРІ РґР»СЏ С†РёС„СЂРѕРІС‹С… С‚РѕРІР°СЂРѕРІ
         for item in items:
             if item.item_type == ItemType.DIGITAL and item.delivery_type == 'codes':
                 available_codes = (await db.execute(
@@ -306,12 +296,12 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
                 )).scalar_one()
                 
                 if available_codes < 1:
-                    await call.answer(f"? Товар '{item.title}' закончился", show_alert=True)
+                    await call.answer(f"? РўРѕРІР°СЂ '{item.title}' Р·Р°РєРѕРЅС‡РёР»СЃСЏ", show_alert=True)
                     return
         
         total_amount = sum(it.price_minor for it in items)
         
-        # Если есть физические товары, запрашиваем данные доставки
+        # Р•СЃР»Рё РµСЃС‚СЊ С„РёР·РёС‡РµСЃРєРёРµ С‚РѕРІР°СЂС‹, Р·Р°РїСЂР°С€РёРІР°РµРј РґР°РЅРЅС‹Рµ РґРѕСЃС‚Р°РІРєРё
         if await has_offline_items(items):
             await state.update_data(
                 cart_items=item_ids,
@@ -321,28 +311,28 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
             texts = load_texts()
             prompt = texts.get("offline_delivery", {}).get("prompts", {}).get(
                 "fullname", 
-                "?? Введите ваше ФИО для доставки:"
+                "?? Р’РІРµРґРёС‚Рµ РІР°С€Рµ Р¤РРћ РґР»СЏ РґРѕСЃС‚Р°РІРєРё:"
             )
             
             try:
                 if call.message.photo:
                     await call.message.edit_caption(
                         caption=prompt,
-                        reply_markup=skip_kb("skip_fullname")  # ? ИСПРАВЛЕНО
+                        reply_markup=skip_kb("skip_fullname")  # ? РРЎРџР РђР’Р›Р•РќРћ
                     )
                 else:
                     await call.message.edit_text(
                         text=prompt,
-                        reply_markup=skip_kb("skip_fullname")  # ? ИСПРАВЛЕНО
+                        reply_markup=skip_kb("skip_fullname")  # ? РРЎРџР РђР’Р›Р•РќРћ
                     )
             except Exception:
-                await call.message.answer(prompt, reply_markup=skip_kb("skip_fullname"))  # ? ИСПРАВЛЕНО
+                await call.message.answer(prompt, reply_markup=skip_kb("skip_fullname"))  # ? РРЎРџР РђР’Р›Р•РќРћ
             
             await state.set_state(OfflineDeliveryStates.waiting_for_fullname)
             await call.answer()
             return
         
-        # Создание заказа для цифровых товаров/услуг (БЕЗ данных доставки)
+        # РЎРѕР·РґР°РЅРёРµ Р·Р°РєР°Р·Р° РґР»СЏ С†РёС„СЂРѕРІС‹С… С‚РѕРІР°СЂРѕРІ/СѓСЃР»СѓРі (Р‘Р•Р— РґР°РЅРЅС‹С… РґРѕСЃС‚Р°РІРєРё)
         order = Order(
             user_id=user.id,
             item_id=None,
@@ -355,7 +345,7 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
         db.add(order)
         await db.flush()
         
-        # Создаём покупки БЕЗ данных доставки
+        # РЎРѕР·РґР°С‘Рј РїРѕРєСѓРїРєРё Р‘Р•Р— РґР°РЅРЅС‹С… РґРѕСЃС‚Р°РІРєРё
         for item in items:
             purchase = Purchase(
                 order_id=order.id,
@@ -371,7 +361,7 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
         try:
             idem = str(uuid.uuid4())
             templates = load_texts().get("payment", {}).get("description_templates", {})
-            description = (templates.get("cart") or "Оплата корзины | Заказ {order_id}").format(order_id=order.id)
+            description = (templates.get("cart") or "РћРїР»Р°С‚Р° РєРѕСЂР·РёРЅС‹ | Р—Р°РєР°Р· {order_id}").format(order_id=order.id)
             
             resp = await client.create_payment(
                 amount_minor=total_amount,
@@ -385,7 +375,7 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
             url = (resp or {}).get("confirmation", {}).get("confirmation_url")
             if not url:
                 await db.rollback()
-                await call.message.answer("Не удалось создать заказ. Попробуйте позже.")
+                await call.message.answer("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ Р·Р°РєР°Р·. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.")
                 return
             
             order.fk_order_id = resp.get("id")
@@ -394,27 +384,27 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
             
             await db.commit()
             
-            # Очищаем корзину после успешного создания заказа
+            # РћС‡РёС‰Р°РµРј РєРѕСЂР·РёРЅСѓ РїРѕСЃР»Рµ СѓСЃРїРµС€РЅРѕРіРѕ СЃРѕР·РґР°РЅРёСЏ Р·Р°РєР°Р·Р°
             await db.execute(delete(CartItem).where(CartItem.user_id == user.id))
             await db.commit()
             
             try:
                 if call.message.photo:
                     await call.message.edit_caption(
-                        caption="Перейдите к оплате:",
+                        caption="РџРµСЂРµР№РґРёС‚Рµ Рє РѕРїР»Р°С‚Рµ:",
                         reply_markup=payment_link_kb(url)
                     )
                 else:
                     await call.message.edit_text(
-                        "Перейдите к оплате:",
+                        "РџРµСЂРµР№РґРёС‚Рµ Рє РѕРїР»Р°С‚Рµ:",
                         reply_markup=payment_link_kb(url)
                     )
             except Exception:
-                await call.message.answer("Ссылка на оплату:", reply_markup=payment_link_kb(url))
+                await call.message.answer("РЎСЃС‹Р»РєР° РЅР° РѕРїР»Р°С‚Сѓ:", reply_markup=payment_link_kb(url))
         except Exception as e:
             await db.rollback()
             logger.error(f"Error creating cart order: {e}")
-            await call.message.answer("Не удалось создать заказ. Попробуйте позже.")
+            await call.message.answer("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ Р·Р°РєР°Р·. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.")
         finally:
             await client.close()
     

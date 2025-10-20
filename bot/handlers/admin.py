@@ -1,5 +1,5 @@
 """
-Обработчики административных функций
+РћР±СЂР°Р±РѕС‚С‡РёРєРё Р°РґРјРёРЅРёСЃС‚СЂР°С‚РёРІРЅС‹С… С„СѓРЅРєС†РёР№
 """
 import logging
 import uuid
@@ -25,7 +25,7 @@ class AdminInvoiceStates(StatesGroup):
 
 
 def _is_admin_user(tg_id: int | None, username: str | None) -> bool:
-    """Проверка является ли пользователь администратором"""
+    """РџСЂРѕРІРµСЂРєР° СЏРІР»СЏРµС‚СЃСЏ Р»Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂРѕРј"""
     try:
         if settings.admin_chat_id and tg_id is not None:
             if str(tg_id) == str(settings.admin_chat_id):
@@ -39,12 +39,12 @@ def _is_admin_user(tg_id: int | None, username: str | None) -> bool:
 
 @router.callback_query(F.data == "admin:create_invoice")
 async def admin_create_invoice_start(call: CallbackQuery, state: FSMContext) -> None:
-    """Начало создания счёта администратором"""
+    """РќР°С‡Р°Р»Рѕ СЃРѕР·РґР°РЅРёСЏ СЃС‡С‘С‚Р° Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂРѕРј"""
     if not _is_admin_user(call.from_user.id, call.from_user.username):
-        await call.answer("Недоступно", show_alert=True)
+        await call.answer("РќРµРґРѕСЃС‚СѓРїРЅРѕ", show_alert=True)
         return
     
-    prompt = load_texts().get("admin", {}).get("prompts", {}).get("description", "Введите описание платежа:")
+    prompt = load_texts().get("admin", {}).get("prompts", {}).get("description", "Р’РІРµРґРёС‚Рµ РѕРїРёСЃР°РЅРёРµ РїР»Р°С‚РµР¶Р°:")
     
     try:
         if call.message.photo:
@@ -62,7 +62,7 @@ async def admin_create_invoice_start(call: CallbackQuery, state: FSMContext) -> 
 
 @router.message(AdminInvoiceStates.waiting_for_description)
 async def admin_invoice_capture_description(message: Message, state: FSMContext) -> None:
-    """Обработка описания счёта"""
+    """РћР±СЂР°Р±РѕС‚РєР° РѕРїРёСЃР°РЅРёСЏ СЃС‡С‘С‚Р°"""
     if not _is_admin_user(message.from_user.id, message.from_user.username):
         await state.clear()
         return
@@ -70,28 +70,28 @@ async def admin_invoice_capture_description(message: Message, state: FSMContext)
     desc = (message.text or "").strip()
     await state.update_data(invoice_desc=desc)
     
-    prompt = load_texts().get("admin", {}).get("prompts", {}).get("amount", "Введите сумму в рублях:")
+    prompt = load_texts().get("admin", {}).get("prompts", {}).get("amount", "Р’РІРµРґРёС‚Рµ СЃСѓРјРјСѓ РІ СЂСѓР±Р»СЏС…:")
     await message.answer(prompt, reply_markup=back_kb("menu:admin"))
     await state.set_state(AdminInvoiceStates.waiting_for_amount)
 
 
 @router.message(AdminInvoiceStates.waiting_for_amount)
 async def admin_invoice_capture_amount(message: Message, state: FSMContext) -> None:
-    """Обработка суммы счёта и создание платежа"""
+    """РћР±СЂР°Р±РѕС‚РєР° СЃСѓРјРјС‹ СЃС‡С‘С‚Р° Рё СЃРѕР·РґР°РЅРёРµ РїР»Р°С‚РµР¶Р°"""
     if not _is_admin_user(message.from_user.id, message.from_user.username):
         await state.clear()
         return
     
     text_val = (message.text or "").strip().replace(" ", "")
     if not text_val.isdigit() or int(text_val) <= 0:
-        await message.answer("Некорректная сумма. Введите целое число больше 0.", reply_markup=back_kb("menu:admin"))
+        await message.answer("РќРµРєРѕСЂСЂРµРєС‚РЅР°СЏ СЃСѓРјРјР°. Р’РІРµРґРёС‚Рµ С†РµР»РѕРµ С‡РёСЃР»Рѕ Р±РѕР»СЊС€Рµ 0.", reply_markup=back_kb("menu:admin"))
         return
     
     amount_minor = int(text_val) * 100
     data = await state.get_data()
-    description = data.get("invoice_desc") or "Счёт от администратора"
+    description = data.get("invoice_desc") or "РЎС‡С‘С‚ РѕС‚ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°"
     
-    # Создаем платёж через ЮKassa
+    # РЎРѕР·РґР°РµРј РїР»Р°С‚С‘Р¶ С‡РµСЂРµР· Р®Kassa
     client = YooKassaClient()
     idem = str(uuid.uuid4())
     payment_id = f"admin:{message.from_user.id}:{idem}"
@@ -109,13 +109,13 @@ async def admin_invoice_capture_amount(message: Message, state: FSMContext) -> N
         url = (resp or {}).get("confirmation", {}).get("confirmation_url")
         
         if not url:
-            await message.answer("Не удалось получить ссылку на оплату. Попробуйте позже.")
+            await message.answer("РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕР»СѓС‡РёС‚СЊ СЃСЃС‹Р»РєСѓ РЅР° РѕРїР»Р°С‚Сѓ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.")
         else:
-            title = load_texts().get("admin", {}).get("result", {}).get("link_title", "Ссылка на оплату:")
+            title = load_texts().get("admin", {}).get("result", {}).get("link_title", "РЎСЃС‹Р»РєР° РЅР° РѕРїР»Р°С‚Сѓ:")
             await message.answer(f"{title}\n{url}", reply_markup=payment_link_kb(url))
     except Exception as e:
         logger.error(f"Error creating admin invoice: {e}")
-        await message.answer("Ошибка при создании счёта. Попробуйте позже.")
+        await message.answer("РћС€РёР±РєР° РїСЂРё СЃРѕР·РґР°РЅРёРё СЃС‡С‘С‚Р°. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.")
     finally:
         await client.close()
     

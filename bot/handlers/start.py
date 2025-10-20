@@ -1,5 +1,5 @@
 """
-Обработчики команды /start и быстрых команд
+РћР±СЂР°Р±РѕС‚С‡РёРєРё РєРѕРјР°РЅРґС‹ /start Рё Р±С‹СЃС‚СЂС‹С… РєРѕРјР°РЅРґ
 """
 import logging
 from pathlib import Path
@@ -19,7 +19,7 @@ router = Router()
 
 
 def _is_admin_user(tg_id: int | None, username: str | None) -> bool:
-    """Проверка является ли пользователь администратором"""
+    """РџСЂРѕРІРµСЂРєР° СЏРІР»СЏРµС‚СЃСЏ Р»Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂРѕРј"""
     try:
         if settings.admin_chat_id and tg_id is not None:
             if str(tg_id) == str(settings.admin_chat_id):
@@ -33,7 +33,7 @@ def _is_admin_user(tg_id: int | None, username: str | None) -> bool:
 
 @router.message(F.text == "/start")
 async def start_handler(message: Message) -> None:
-    """Обработчик команды /start"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РєРѕРјР°РЅРґС‹ /start"""
     texts = load_texts()
 
     async with AsyncSessionLocal() as db:
@@ -45,13 +45,13 @@ async def start_handler(message: Message) -> None:
             total = (await db.execute(select(func.count()).select_from(User))).scalar_one()
             if settings.admin_chat_id:
                 try:
-                    username = f"@{message.from_user.username}" if message.from_user.username else "—"
+                    username = f"@{message.from_user.username}" if message.from_user.username else "вЂ”"
                     text = (
-                        "? Новый пользователь "
+                        "? РќРѕРІС‹Р№ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ "
                         f"{message.from_user.full_name}\n"
                         f"Username: {username}\n"
                         f"ID: {message.from_user.id}\n"
-                        f"Всего: {total}"
+                        f"Р’СЃРµРіРѕ: {total}"
                     )
                     await message.bot.send_message(int(settings.admin_chat_id), text)
                 except Exception:
@@ -65,7 +65,7 @@ async def start_handler(message: Message) -> None:
             select(func.count()).select_from(CartItem).where(CartItem.user_id == u.id)
         )).scalar_one()
 
-    # Отправляем главное меню с картинкой если есть
+    # РћС‚РїСЂР°РІР»СЏРµРј РіР»Р°РІРЅРѕРµ РјРµРЅСЋ СЃ РєР°СЂС‚РёРЅРєРѕР№ РµСЃР»Рё РµСЃС‚СЊ
     try:
         if "image" in texts["main_menu"]:
             photo = FSInputFile(texts["main_menu"]["image"])
@@ -90,8 +90,8 @@ async def start_handler(message: Message) -> None:
 
 @router.message(F.text.startswith("/"))
 async def quick_menu_commands(message: Message) -> None:
-    """Обработчик быстрых команд меню"""
-    from .items import list_items  # Локальный импорт для избежания циклических зависимостей
+    """РћР±СЂР°Р±РѕС‚С‡РёРє Р±С‹СЃС‚СЂС‹С… РєРѕРјР°РЅРґ РјРµРЅСЋ"""
+    from .items import list_items  # Р›РѕРєР°Р»СЊРЅС‹Р№ РёРјРїРѕСЂС‚ РґР»СЏ РёР·Р±РµР¶Р°РЅРёСЏ С†РёРєР»РёС‡РµСЃРєРёС… Р·Р°РІРёСЃРёРјРѕСЃС‚РµР№
     
     cmd = (message.text or "").strip().lstrip("/").lower()
     
@@ -99,7 +99,7 @@ async def quick_menu_commands(message: Message) -> None:
         await list_items(message, ItemType.DIGITAL, section="projects", page=1)
         return
     
-    if cmd in ("products", "shop", "товары"):
+    if cmd in ("products", "shop", "С‚РѕРІР°СЂС‹"):
         await list_items(message, ItemType.OFFLINE, section="products", page=1)
         return
     
@@ -112,12 +112,12 @@ async def quick_menu_commands(message: Message) -> None:
         async with AsyncSessionLocal() as db:
             user = (await db.execute(select(User).where(User.tg_id == message.from_user.id))).scalar_one_or_none()
             if not user:
-                await message.answer(texts.get("empty", {}).get("purchased", "У вас нет купленных проектов."))
+                await message.answer(texts.get("empty", {}).get("purchased", "РЈ РІР°СЃ РЅРµС‚ РєСѓРїР»РµРЅРЅС‹С… РїСЂРѕРµРєС‚РѕРІ."))
                 return
             
             purchases = (await db.execute(select(Purchase).where(Purchase.user_id == user.id))).scalars().all()
             if not purchases:
-                await message.answer(texts.get("empty", {}).get("purchased", "У вас нет купленных проектов."))
+                await message.answer(texts.get("empty", {}).get("purchased", "РЈ РІР°СЃ РЅРµС‚ РєСѓРїР»РµРЅРЅС‹С… РїСЂРѕРµРєС‚РѕРІ."))
                 return
             
             item_ids = [p.item_id for p in purchases if p.item_id is not None]
@@ -128,7 +128,7 @@ async def quick_menu_commands(message: Message) -> None:
             kb.append([InlineKeyboardButton(text=it.title, callback_data=f"item:{it.id}:{it.item_type.value}")])
         kb.append([InlineKeyboardButton(text=texts["buttons"]["back"], callback_data="back:main")])
         
-        title = texts["main_menu"].get("purchased_title", "Ваши купленные проекты:")
+        title = texts["main_menu"].get("purchased_title", "Р’Р°С€Рё РєСѓРїР»РµРЅРЅС‹Рµ РїСЂРѕРµРєС‚С‹:")
         image_path = texts["main_menu"].get("images", {}).get("purchased")
         
         if image_path and Path(image_path).is_file():
@@ -145,7 +145,7 @@ async def quick_menu_commands(message: Message) -> None:
         
         if image_exists:
             photo = FSInputFile(donate_image)
-            await message.answer_photo(photo=photo, caption="Выберите сумму доната:", reply_markup=donate_amounts_kb())
+            await message.answer_photo(photo=photo, caption="Р’С‹Р±РµСЂРёС‚Рµ СЃСѓРјРјСѓ РґРѕРЅР°С‚Р°:", reply_markup=donate_amounts_kb())
         else:
-            await message.answer(text="Выберите сумму доната:", reply_markup=donate_amounts_kb())
+            await message.answer(text="Р’С‹Р±РµСЂРёС‚Рµ СЃСѓРјРјСѓ РґРѕРЅР°С‚Р°:", reply_markup=donate_amounts_kb())
         return
