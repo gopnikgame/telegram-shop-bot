@@ -28,23 +28,23 @@ LOG_TYPE="${1:-all}"
 
 case $LOG_TYPE in
     api)
-        echo "?? Логи API:"
+        echo "📊 Логи API:"
         docker_compose_cmd logs api --tail=100
         ;;
     db)
-        echo "?? Логи PostgreSQL:"
+        echo "🗄️ Логи PostgreSQL:"
         docker_compose_cmd logs db --tail=100
         ;;
     errors)
-        echo "? Логи ошибок:"
+        echo "❌ Логи ошибок:"
         docker_compose_cmd logs --tail=200 | grep -i "error\|exception\|failed\|critical"
         ;;
     follow|f)
-        echo "?? Отслеживание логов (Ctrl+C для выхода):"
+        echo "📡 Отслеживание логов (Ctrl+C для выхода):"
         docker_compose_cmd logs -f
         ;;
     *)
-        echo "?? Все логи:"
+        echo "📋 Все логи:"
         docker_compose_cmd logs --tail=100
         ;;
 esac

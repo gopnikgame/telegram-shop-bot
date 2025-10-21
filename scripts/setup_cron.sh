@@ -16,11 +16,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BACKUP_SCRIPT="$PROJECT_ROOT/scripts/backup_db.sh"
 
-echo -e "${BLUE}? Настройка cron для автоматических бэкапов...${NC}\n"
+echo -e "${BLUE}⏰ Настройка cron для автоматических бэкапов...${NC}\n"
 
 # Проверка существования скрипта бэкапа
 if [ ! -f "$BACKUP_SCRIPT" ]; then
-    echo -e "${RED}? Скрипт бэкапа не найден: $BACKUP_SCRIPT${NC}"
+    echo -e "${RED}❌ Скрипт бэкапа не найден: $BACKUP_SCRIPT${NC}"
     exit 1
 fi
 
@@ -60,11 +60,11 @@ case $choice in
         DESCRIPTION="пользовательское расписание: $CRON_SCHEDULE"
         ;;
     0)
-        echo -e "${YELLOW}?? Отменено${NC}"
+        echo -e "${YELLOW}⚠️ Отменено${NC}"
         exit 0
         ;;
     *)
-        echo -e "${RED}? Неверный выбор${NC}"
+        echo -e "${RED}❌ Неверный выбор${NC}"
         exit 1
         ;;
 esac
@@ -73,7 +73,7 @@ esac
 CRON_JOB="$CRON_SCHEDULE $BACKUP_SCRIPT >> $PROJECT_ROOT/logs/cron_backup.log 2>&1"
 
 echo ""
-echo -e "${BLUE}?? Будет создана cron задача:${NC}"
+echo -e "${BLUE}📝 Будет создана cron задача:${NC}"
 echo "  Расписание: $DESCRIPTION"
 echo "  Команда: $BACKUP_SCRIPT"
 echo ""
@@ -88,14 +88,14 @@ if [[ ! $REPLY =~ ^[Nn]$ ]]; then
     # Добавляем новую задачу
     (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
     
-    echo -e "${GREEN}? Cron задача установлена${NC}\n"
+    echo -e "${GREEN}✅ Cron задача установлена${NC}\n"
     
-    echo -e "${BLUE}?? Текущие cron задачи:${NC}"
+    echo -e "${BLUE}📋 Текущие cron задачи:${NC}"
     crontab -l
     
     echo ""
-    echo -e "${YELLOW}?? Логи бэкапов будут сохраняться в:${NC}"
+    echo -e "${YELLOW}⚠️ Логи бэкапов будут сохраняться в:${NC}"
     echo "   $PROJECT_ROOT/logs/cron_backup.log"
 else
-    echo -e "${YELLOW}?? Отменено${NC}"
+    echo -e "${YELLOW}⚠️ Отменено${NC}"
 fi

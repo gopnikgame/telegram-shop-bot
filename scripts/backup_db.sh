@@ -22,16 +22,16 @@ NC='\033[0m'
 
 BACKUP_FILE="$BACKUPS_DIR/db_backup_$(date +%Y%m%d_%H%M%S).sql"
 
-echo -e "${BLUE}?? Создание бэкапа базы данных...${NC}"
+echo -e "${BLUE}💾 Создание бэкапа базы данных...${NC}"
 
 if docker ps | grep -q "shopbot-postgres"; then
     docker exec shopbot-postgres pg_dump -U shopbot shopbot > "$BACKUP_FILE"
-    echo -e "${GREEN}? Бэкап создан: $BACKUP_FILE${NC}"
+    echo -e "${GREEN}✅ Бэкап создан: $BACKUP_FILE${NC}"
     
     # Показываем размер файла
     SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
     echo "   Размер: $SIZE"
 else
-    echo -e "${RED}? База данных не запущена${NC}"
+    echo -e "${RED}❌ База данных не запущена${NC}"
     exit 1
 fi

@@ -178,7 +178,7 @@ async def show_item(call: CallbackQuery) -> None:
         caption = (
             f"*{item.title}*\n\n"
             f"{item.description}\n\n"
-            f"?? Цена: `{item.price_minor/100:.2f}` ?"
+            f"💰 Цена: `{item.price_minor/100:.2f}` ₽"
         )
         
         logger.info("Показываем карточку: %s (id=%s, type=%s)", item.title, item.id, item.item_type)
