@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     yk_return_url: str = Field(alias="YK_RETURN_URL")
     yk_webhook_user: str | None = Field(alias="YK_WEBHOOK_USER", default=None)
     yk_webhook_password: str | None = Field(alias="YK_WEBHOOK_PASSWORD", default=None)
+    trusted_webhook_ips: str | None = Field(alias="TRUSTED_WEBHOOK_IPS", default=None)
 
     # Server
     server_ip: str = Field(alias="SERVER_IP", default="127.0.0.1")
@@ -31,6 +32,9 @@ class Settings(BaseSettings):
     show_contact_button: bool = Field(alias="SHOW_CONTACT_BUTTON", default=True)
     contact_admin: str | None = Field(alias="CONTACT_ADMIN", default=None)
     show_donate_button: bool = Field(alias="SHOW_DONATE_BUTTON", default=True)
+
+    # Shopping settings
+    enable_direct_purchase: bool = Field(alias="ENABLE_DIRECT_PURCHASE", default=True)
 
     # Email fallback
     email_domain: str = Field(alias="EMAIL_DOMAIN", default="tg.local")

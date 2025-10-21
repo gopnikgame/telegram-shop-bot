@@ -181,11 +181,22 @@ async def yookassa_webhook(
             # Отправляем уведомление пользователю
             if order.buyer_tg_id:
                 try:
+                    # Формируем ссылку на администратора
+                    admin_contact = settings.contact_admin or settings.admin_tg_username
+                    contact_link = ""
+                    
+                    if admin_contact:
+                        # Убираем @ если есть
+                        username = admin_contact.lstrip('@')
+                        contact_link = f"[администратором](https://t.me/{username})"
+                    else:
+                        contact_link = "администратором"
+                    
                     user_message = (
                         "✅ *Оплата получена!*\n\n"
-                        f"📦 Заказ #{order.id} успешно оплачен\n"
+                        f"📦 Заказ №{order.id} успешно оплачен\n"
                         f"💰 Сумма: `{order.amount_minor/100:.2f}` ₽\n\n"
-                        "Администратор свяжется с вами в ближайшее время для уточнения деталей доставки."
+                        f"Свяжитесь с {contact_link} для уточнения деталей доставки."
                     )
                     await bot.send_message(
                         chat_id=int(order.buyer_tg_id),
@@ -217,7 +228,7 @@ async def yookassa_webhook(
                     
                     texts = load_texts().get("notifications", {})
                     template = texts.get("offline_order_paid") or (
-                        "💳 ОФФЛАЙН ЗАКАЗ #{order_id} ОПЛАЧЕН\n\n"
+                        "💳 ОФФЛАЙН ЗАКАЗ №{order_id} ОПЛАЧЕН\n\n"
                         "Товары:\n{items_text}\n\n"
                         "Сумма: {amount} ₽\n\n"
                         "📦 Данные доставки:\n"
@@ -242,8 +253,7 @@ async def yookassa_webhook(
                     
                     await bot.send_message(
                         chat_id=int(settings.admin_chat_id),
-                        text=message,
-                        parse_mode="Markdown"
+                        text=message
                     )
                     logger.info(f"Sent offline order paid notification to admin for order #{order.id}")
                 except Exception as e:

@@ -86,10 +86,18 @@ def item_card_kb(item_id: int, item_type: str, purchased: bool = False, from_pur
     texts = load_texts()
     rows = []
     back_cb = "back:purchased" if from_purchased else f"back:list:{item_type}:{page}"
+  
+    # Проверяем, разрешена ли прямая покупка (приоритет: env -> texts.yml -> default true)
+    enable_direct_purchase = settings.enable_direct_purchase
+    if not enable_direct_purchase:
+        # Дополнительно проверяем настройки из texts.yml
+        shopping_settings = texts.get("main_menu", {}).get("shopping_settings", {})
+        enable_direct_purchase = shopping_settings.get("enable_direct_purchase", True)
     
     # Кнопки покупки всегда активны, независимо от статуса purchased
-    # Кнопка "Купить сейчас"
-    rows.append([InlineKeyboardButton(text=texts["buttons"].get("buy_now", "🛒 Купить сейчас"), callback_data=f"buy_one:{item_id}")])
+    # Кнопка "Купить сейчас" - показываем только если разрешена прямая покупка
+    if enable_direct_purchase:
+        rows.append([InlineKeyboardButton(text=texts["buttons"].get("buy_now", "🛒 Купить сейчас"), callback_data=f"buy_one:{item_id}")])
     
     # Кнопка "Добавить в корзину" / "Убрать из корзины"
     if in_cart:

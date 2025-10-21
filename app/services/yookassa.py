@@ -105,16 +105,39 @@ _YK_CIDRS = [
     "77.75.154.128/25",
     "2a02:5180::/32",
 ]
+
+# Добавляем доверенные локальные/прокси адреса
+_TRUSTED_LOCAL_IPS = [
+    "192.168.88.253",  # Прокси-хост
+    "127.0.0.1",       # Localhost
+    "::1",   # Localhost IPv6
+]
+
+# Загружаем дополнительные доверенные IP из переменной окружения (если есть)
+if settings.trusted_webhook_ips:
+    additional_ips = [ip.strip() for ip in settings.trusted_webhook_ips.split(",") if ip.strip()]
+    _TRUSTED_LOCAL_IPS.extend(additional_ips)
+
 _YK_NETWORKS = [ipaddress.ip_network(cidr) for cidr in _YK_CIDRS]
 
 
 def is_trusted_yookassa_ip(remote_ip: Optional[str]) -> bool:
     if not remote_ip:
         return False
+    
+    # Проверяем список доверенных локальных IP
+    if remote_ip in _TRUSTED_LOCAL_IPS:
+        logger.bind(event="yk.webhook.trusted_local").debug(
+            "Webhook от доверенного локального IP: {}", remote_ip
+        )
+        return True
+    
+    # Проверяем диапазоны YooKassa
     try:
         ip_obj = ipaddress.ip_address(remote_ip)
     except ValueError:
         return False
+    
     return any(ip_obj in net for net in _YK_NETWORKS)
 
 
