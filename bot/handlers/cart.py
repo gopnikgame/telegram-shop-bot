@@ -125,14 +125,6 @@ async def add_to_cart(call: CallbackQuery) -> None:
             await call.answer("Товар не найден", show_alert=True)
             return
         
-        purchased = (await db.execute(
-            select(Purchase).where(Purchase.user_id == user.id, Purchase.item_id == item_id_int)
-        )).first() is not None
-        
-        if purchased and item.item_type == ItemType.DIGITAL:
-            await call.answer("Вы уже купили этот товар", show_alert=True)
-            return
-        
         existing = (await db.execute(
             select(CartItem).where(CartItem.user_id == user.id, CartItem.item_id == item_id_int)
         )).scalar_one_or_none()
@@ -263,7 +255,8 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
     """Оформление заказа из корзины"""
     # Импортируем OfflineDeliveryStates локально чтобы избежать циклических импортов
     from .delivery import OfflineDeliveryStates
-    
+    from .items import RepurchaseStates, repurchase_confirmation_kb
+ 
     async with AsyncSessionLocal() as db:
         user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
         if not user:
@@ -283,6 +276,53 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
         
         if not items:
             await call.answer("Нет доступных товаров для оплаты", show_alert=True)
+            return
+        
+        # Проверяем наличие уже купленных товаров в корзине
+        purchased_items = []
+        for item in items:
+            purchased = (await db.execute(
+                select(Purchase).where(Purchase.user_id == user.id, Purchase.item_id == item.id)
+            )).first() is not None
+            if purchased:
+                purchased_items.append(item.title)
+
+        if purchased_items:
+            # Есть уже купленные товары - запрашиваем подтверждение
+            await state.update_data(cart_checkout_pending=True, cart_item_ids=item_ids)
+            await state.set_state(RepurchaseStates.waiting_for_confirmation)
+            
+            items_list = "\n".join([f"• {title}" for title in purchased_items])
+            message_text = (
+                f"⚠️ В корзине есть уже купленные товары:\n\n"
+                f"{items_list}\n\n"
+                f"Продолжить оформление заказа?"
+            )
+            
+            kb = [
+                [
+                    InlineKeyboardButton(text="✅ Да, оформить заказ", callback_data="cart:checkout:confirm"),
+                    InlineKeyboardButton(text="❌ Нет", callback_data="cart:checkout:cancel")
+                ]
+            ]
+            
+            try:
+                if call.message.photo:
+                    await call.message.edit_caption(
+                        caption=message_text,
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+                    )
+                else:
+                    await call.message.edit_text(
+                        text=message_text,
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+                    )
+            except Exception:
+                await call.message.answer(
+                    message_text,
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+                )
+            await call.answer()
             return
         
         # Проверка наличия кодов для цифровых товаров
@@ -409,3 +449,32 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
             await client.close()
     
     await call.answer()
+
+
+@router.callback_query(F.data == "cart:checkout:confirm")
+async def cart_checkout_confirm(call: CallbackQuery, state: FSMContext) -> None:
+    """Подтверждение оформления корзины с уже купленными товарами"""
+    data = await state.get_data()
+    cart_item_ids = data.get("cart_item_ids", [])
+    
+    if not cart_item_ids:
+        await call.answer("Корзина пуста", show_alert=True)
+        await state.clear()
+        return
+    
+    # Очищаем флаг ожидания подтверждения и продолжаем оформление
+    await state.update_data(cart_checkout_pending=False)
+    await state.clear()
+    
+    # Вызываем оригинальную логику оформления заказа
+    await checkout_cart(call, state)
+
+
+@router.callback_query(F.data == "cart:checkout:cancel")
+async def cart_checkout_cancel(call: CallbackQuery, state: FSMContext) -> None:
+    """Отмена оформления корзины"""
+    await state.clear()
+    
+    # Возвращаемся к корзине
+    from .cart import show_cart
+    await show_cart(call)

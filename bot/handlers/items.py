@@ -5,9 +5,11 @@ import logging
 from pathlib import Path
 
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, FSInputFile, InputMediaPhoto
+from aiogram.types import Message, CallbackQuery, FSInputFile, InputMediaPhoto, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.filters import StateFilter
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
 from sqlalchemy import select, func
 
 from app.utils.texts import load_texts
@@ -22,6 +24,23 @@ from app.services.orders_client import OrdersClient
 
 logger = logging.getLogger("shopbot")
 router = Router()
+
+
+class RepurchaseStates(StatesGroup):
+    """Состояния для подтверждения повторной покупки"""
+    waiting_for_confirmation = State()
+
+
+def repurchase_confirmation_kb(item_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения повторной покупки"""
+    texts = load_texts()
+    kb = [
+        [
+            InlineKeyboardButton(text="✅ Да, купить еще раз", callback_data=f"repurchase:confirm:{item_id}"),
+            InlineKeyboardButton(text="❌ Нет", callback_data=f"repurchase:cancel:{item_id}")
+        ]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
 async def list_items(message: Message, item_type: ItemType, section: str = None, call: CallbackQuery = None, page: int = 1, page_size: int = 5) -> None:
@@ -181,6 +200,10 @@ async def show_item(call: CallbackQuery) -> None:
             f"💰 Цена: `{item.price_minor/100:.2f}` ₽"
         )
         
+        # Добавляем информацию о том, что товар уже покупался
+        if purchased:
+            caption += "\n\n✅ _Вы уже покупали этот товар_"
+        
         logger.info("Показываем карточку: %s (id=%s, type=%s)", item.title, item.id, item.item_type)
         
         try:
@@ -235,14 +258,119 @@ async def cb_buy(call: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data.startswith("buy_one:"))
-async def cb_buy_one(call: CallbackQuery) -> None:
-    """Быстрая покупка одного товара"""
+async def cb_buy_one(call: CallbackQuery, state: FSMContext) -> None:
+    """Быстрая покупка одного товара с проверкой на повторную покупку"""
     _, item_id = call.data.split(":")
     item_id_int = int(item_id)
+ 
+    # Проверяем, покупал ли пользователь этот товар ранее
+    async with AsyncSessionLocal() as db:
+        user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
+        if user:
+            purchased = (await db.execute(
+                select(Purchase).where(Purchase.user_id == user.id, Purchase.item_id == item_id_int)
+            )).first() is not None
+       
+            if purchased:
+                # Товар уже покупался - запрашиваем подтверждение
+                await state.update_data(repurchase_item_id=item_id_int)
+                await state.set_state(RepurchaseStates.waiting_for_confirmation)
+        
+                try:
+                    if call.message.photo:
+                        await call.message.edit_caption(
+                            caption="⚠️ Вы уже покупали данный товар.\n\nКупить еще раз?",
+                            reply_markup=repurchase_confirmation_kb(item_id_int)
+                        )
+                    else:
+                        await call.message.edit_text(
+                            text="⚠️ Вы уже покупали данный товар.\n\nКупить еще раз?",
+                            reply_markup=repurchase_confirmation_kb(item_id_int)
+                        )
+                except Exception:
+                    await call.message.answer(
+                        "⚠️ Вы уже покупали данный товар.\n\nКупить еще раз?",
+                        reply_markup=repurchase_confirmation_kb(item_id_int)
+                    )
+                await call.answer()
+                return
     
+    # Если не покупал - создаём заказ сразу
+    await create_order_for_item(call, item_id_int)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("repurchase:confirm:"))
+async def repurchase_confirm(call: CallbackQuery, state: FSMContext) -> None:
+    """Подтверждение повторной покупки"""
+    _, _, item_id = call.data.split(":")
+    item_id_int = int(item_id)
+    
+    await state.clear()
+    await create_order_for_item(call, item_id_int)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("repurchase:cancel:"))
+async def repurchase_cancel(call: CallbackQuery, state: FSMContext) -> None:
+    """Отмена повторной покупки"""
+    _, _, item_id = call.data.split(":")
+    item_id_int = int(item_id)
+    
+    await state.clear()
+    
+    # Возвращаемся к карточке товара
+    async with AsyncSessionLocal() as db:
+        item = (await db.execute(select(Item).where(Item.id == item_id_int))).scalar_one_or_none()
+        user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
+        
+        if not item:
+            await call.answer("Товар не найден", show_alert=True)
+            return
+
+        purchased = False
+        in_cart = False
+        if user:
+            purchased = (await db.execute(
+                select(Purchase).where(Purchase.user_id == user.id, Purchase.item_id == item_id_int)
+            )).first() is not None
+            in_cart = (await db.execute(
+                select(CartItem).where(CartItem.user_id == user.id, CartItem.item_id == item_id_int)
+            )).scalar_one_or_none() is not None
+        
+        caption = (
+            f"*{item.title}*\n\n"
+            f"{item.description}\n\n"
+            f"💰 Цена: `{item.price_minor/100:.2f}` ₽"
+        )
+        
+        if purchased:
+            caption += "\n\n✅ _Вы уже покупали этот товар_"
+        
+        try:
+            if call.message.photo:
+                await call.message.edit_caption(
+                    caption=caption,
+                    parse_mode="Markdown",
+                    reply_markup=item_card_kb(item.id, item.item_type.value, purchased, from_purchased=False, page=1, in_cart=in_cart)
+                )
+            else:
+                await call.message.edit_text(
+                    text=caption,
+                    parse_mode="Markdown",
+                    reply_markup=item_card_kb(item.id, item.item_type.value, purchased, from_purchased=False, page=1, in_cart=in_cart)
+                )
+        except Exception:
+            pass
+    
+    await call.answer("Покупка отменена")
+
+
+async def create_order_for_item(call: CallbackQuery, item_id: int) -> None:
+    """Создание заказа для товара"""
     async with OrdersClient() as client:
         try:
-            url = await client.create_order(item_id_int, call.from_user.id)
+            url = await client.create_order(item_id, call.from_user.id)
             try:
                 await call.message.edit_reply_markup(reply_markup=payment_link_kb(url))
             except Exception:
@@ -255,7 +383,6 @@ async def cb_buy_one(call: CallbackQuery) -> None:
                     await call.message.answer("Ссылка на оплату:", reply_markup=payment_link_kb(url))
         except Exception:
             await call.message.answer("Не удалось создать заказ. Попробуйте позже.")
-    await call.answer()
 
 
 @router.message(StateFilter(None))

@@ -87,18 +87,16 @@ def item_card_kb(item_id: int, item_type: str, purchased: bool = False, from_pur
     rows = []
     back_cb = "back:purchased" if from_purchased else f"back:list:{item_type}:{page}"
     
-    if not purchased or item_type == "service":
-        # Кнопка "Купить сейчас"
-        rows.append([InlineKeyboardButton(text=texts["buttons"].get("buy_now", "🛒 Купить сейчас"), callback_data=f"buy_one:{item_id}")])
-        
-        # Кнопка "Добавить в корзину" / "Убрать из корзины"
-        if in_cart:
-            rows.append([InlineKeyboardButton(text=texts["buttons"].get("remove_from_cart", "❌ Убрать из корзины"), callback_data=f"cart:remove:{item_id}")])
-        else:
-            rows.append([InlineKeyboardButton(text=texts["buttons"].get("add_to_cart", "➕ В корзину"), callback_data=f"cart:add:{item_id}")])
-    else:
-        rows.append([InlineKeyboardButton(text="✅ Уже куплено", callback_data=back_cb)])
+    # Кнопки покупки всегда активны, независимо от статуса purchased
+    # Кнопка "Купить сейчас"
+    rows.append([InlineKeyboardButton(text=texts["buttons"].get("buy_now", "🛒 Купить сейчас"), callback_data=f"buy_one:{item_id}")])
     
+    # Кнопка "Добавить в корзину" / "Убрать из корзины"
+    if in_cart:
+        rows.append([InlineKeyboardButton(text=texts["buttons"].get("remove_from_cart", "❌ Убрать из корзины"), callback_data=f"cart:remove:{item_id}")])
+    else:
+        rows.append([InlineKeyboardButton(text=texts["buttons"].get("add_to_cart", "➕ В корзину"), callback_data=f"cart:add:{item_id}")])
+ 
     rows.append([InlineKeyboardButton(text=texts["buttons"]["back"], callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
