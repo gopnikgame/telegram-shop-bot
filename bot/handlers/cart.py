@@ -6,7 +6,7 @@ import contextlib
 import uuid
 
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, FSInputFile, InputMediaPhoto
+from aiogram.types import CallbackQuery, FSInputFile, InputMediaPhoto, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from sqlalchemy import select, func, delete
 
