@@ -255,7 +255,7 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
     """Оформление заказа из корзины"""
     # Импортируем OfflineDeliveryStates локально чтобы избежать циклических импортов
     from .delivery import OfflineDeliveryStates
-    from .items import RepurchaseStates, repurchase_confirmation_kb
+    from .items import RepurchaseStates
  
     async with AsyncSessionLocal() as db:
         user = (await db.execute(select(User).where(User.tg_id == call.from_user.id))).scalar_one_or_none()
@@ -278,52 +278,57 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
             await call.answer("Нет доступных товаров для оплаты", show_alert=True)
             return
         
-        # Проверяем наличие уже купленных товаров в корзине
-        purchased_items = []
-        for item in items:
-            purchased = (await db.execute(
-                select(Purchase).where(Purchase.user_id == user.id, Purchase.item_id == item.id)
-            )).first() is not None
-            if purchased:
-                purchased_items.append(item.title)
+        # Получаем данные состояния для проверки подтверждения
+        data = await state.get_data()
+        confirmed_repurchase = data.get("confirmed_repurchase", False)
+      
+        # Проверяем наличие уже купленных товаров в корзине ТОЛЬКО если еще не подтверждено
+        if not confirmed_repurchase:
+            purchased_items = []
+            for item in items:
+                purchased = (await db.execute(
+                    select(Purchase).where(Purchase.user_id == user.id, Purchase.item_id == item.id)
+                )).first() is not None
+                if purchased:
+                    purchased_items.append(item.title)
 
-        if purchased_items:
-            # Есть уже купленные товары - запрашиваем подтверждение
-            await state.update_data(cart_checkout_pending=True, cart_item_ids=item_ids)
-            await state.set_state(RepurchaseStates.waiting_for_confirmation)
-            
-            items_list = "\n".join([f"• {title}" for title in purchased_items])
-            message_text = (
-                f"⚠️ В корзине есть уже купленные товары:\n\n"
-                f"{items_list}\n\n"
-                f"Продолжить оформление заказа?"
-            )
-            
-            kb = [
-                [
-                    InlineKeyboardButton(text="✅ Да, оформить заказ", callback_data="cart:checkout:confirm"),
-                    InlineKeyboardButton(text="❌ Нет", callback_data="cart:checkout:cancel")
-                ]
-            ]
-            
-            try:
-                if call.message.photo:
-                    await call.message.edit_caption(
-                        caption=message_text,
-                        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
-                    )
-                else:
-                    await call.message.edit_text(
-                        text=message_text,
-                        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
-                    )
-            except Exception:
-                await call.message.answer(
-                    message_text,
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+            if purchased_items:
+                # Есть уже купленные товары - запрашиваем подтверждение
+                await state.update_data(cart_checkout_pending=True, cart_item_ids=item_ids)
+                await state.set_state(RepurchaseStates.waiting_for_confirmation)
+                
+                items_list = "\n".join([f"• {title}" for title in purchased_items])
+                message_text = (
+                    f"⚠️ В корзине есть уже купленные товары:\n\n"
+                    f"{items_list}\n\n"
+                    f"Продолжить оформление заказа?"
                 )
-            await call.answer()
-            return
+        
+                kb = [
+                    [
+                        InlineKeyboardButton(text="✅ Да, оформить заказ", callback_data="cart:checkout:confirm"),
+                        InlineKeyboardButton(text="❌ Нет", callback_data="cart:checkout:cancel")
+                    ]
+                ]
+                
+                try:
+                    if call.message.photo:
+                        await call.message.edit_caption(
+                            caption=message_text,
+                            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+                        )
+                    else:
+                        await call.message.edit_text(
+                            text=message_text,
+                            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+                        )
+                except Exception:
+                    await call.message.answer(
+                        message_text,
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+                    )
+                await call.answer()
+                return
         
         # Проверка наличия кодов для цифровых товаров
         for item in items:
@@ -428,6 +433,9 @@ async def checkout_cart(call: CallbackQuery, state: FSMContext) -> None:
             await db.execute(delete(CartItem).where(CartItem.user_id == user.id))
             await db.commit()
             
+            # Очищаем состояние после успешного оформления
+            await state.clear()
+            
             try:
                 if call.message.photo:
                     await call.message.edit_caption(
@@ -462,9 +470,8 @@ async def cart_checkout_confirm(call: CallbackQuery, state: FSMContext) -> None:
         await state.clear()
         return
     
-    # Очищаем флаг ожидания подтверждения и продолжаем оформление
-    await state.update_data(cart_checkout_pending=False)
-    await state.clear()
+    # Устанавливаем флаг что пользователь подтвердил повторную покупку
+    await state.update_data(confirmed_repurchase=True, cart_checkout_pending=False)
     
     # Вызываем оригинальную логику оформления заказа
     await checkout_cart(call, state)
