@@ -47,7 +47,7 @@ async def start_handler(message: Message) -> None:
                 try:
                     username = f"@{message.from_user.username}" if message.from_user.username else "—"
                     text = (
-                        "? Новый пользователь "
+                        "✅ Новый пользователь\n"
                         f"{message.from_user.full_name}\n"
                         f"Username: {username}\n"
                         f"ID: {message.from_user.id}\n"
@@ -66,24 +66,33 @@ async def start_handler(message: Message) -> None:
         )).scalar_one()
 
     # Отправляем главное меню с картинкой если есть
-    try:
-        if "image" in texts["main_menu"]:
-            photo = FSInputFile(texts["main_menu"]["image"])
+    image_path = texts["main_menu"].get("image")
+    
+    # Проверяем существование файла
+    if image_path and Path(image_path).is_file():
+        try:
+            photo = FSInputFile(image_path)
             await message.answer_photo(
                 photo=photo,
                 caption=texts["main_menu"]["title"],
                 parse_mode="Markdown",
                 reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(message.from_user.id, message.from_user.username), cart_count=cart_count)
             )
-        else:
+        except Exception as e:
+            logger.error(f"Failed to send photo: {e}")
+            # Если не удалось отправить фото, отправляем текст
             await message.answer(
                 texts["main_menu"]["title"], 
                 parse_mode="Markdown", 
                 reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(message.from_user.id, message.from_user.username), cart_count=cart_count)
             )
-    except FileNotFoundError:
+    else:
+        # Если файл не найден, отправляем только текст
+        if image_path:
+            logger.warning(f"Image file not found: {image_path}")
         await message.answer(
             texts["main_menu"]["title"], 
+            parse_mode="Markdown", 
             reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(message.from_user.id, message.from_user.username), cart_count=cart_count)
         )
 
