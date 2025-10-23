@@ -95,17 +95,35 @@ async def list_items(message: Message, item_type: ItemType, section: str = None,
     
     try:
         if call:
-            if image_path:
-                photo = FSInputFile(image_path)
-                try:
-                    await call.message.edit_media(
-                        media=InputMediaPhoto(media=photo, caption=description),
+            if image_path and Path(image_path).is_file():
+                # При редактировании сообщения с фото - если у сообщения уже есть фото,
+                # просто меняем caption и клавиатуру, не трогая медиа
+                if call.message.photo:
+                    try:
+                        await call.message.edit_caption(
+                            caption=description,
+                            reply_markup=items_list_kb(items, item_type.value, purchased_ids, page=page, total=total, page_size=page_size)
+                        )
+                    except TelegramBadRequest as e:
+                        if "message is not modified" not in str(e):
+                            logger.error(f"Ошибка редактирования caption: {e}")
+                            # Если не получается отредактировать - удаляем и создаем новое
+                            await call.message.delete()
+                            photo = FSInputFile(image_path)
+                            await call.message.answer_photo(
+                                photo=photo,
+                                caption=description,
+                                reply_markup=items_list_kb(items, item_type.value, purchased_ids, page=page, total=total, page_size=page_size)
+                            )
+                else:
+                    # Если у сообщения нет фото - удаляем текстовое и создаем с фото
+                    await call.message.delete()
+                    photo = FSInputFile(image_path)
+                    await call.message.answer_photo(
+                        photo=photo,
+                        caption=description,
                         reply_markup=items_list_kb(items, item_type.value, purchased_ids, page=page, total=total, page_size=page_size)
                     )
-                except TelegramBadRequest as e:
-                    if "message is not modified" not in str(e):
-                        logger.error(f"Ошибка редактирования: {e}")
-                        await call.answer("Произошла ошибка", show_alert=True)
             else:
                 try:
                     await call.message.edit_text(
@@ -116,7 +134,7 @@ async def list_items(message: Message, item_type: ItemType, section: str = None,
                     if "message is not modified" not in str(e):
                         raise
         else:
-            if image_path:
+            if image_path and Path(image_path).is_file():
                 photo = FSInputFile(image_path)
                 await message.answer_photo(
                     photo=photo,
@@ -131,12 +149,12 @@ async def list_items(message: Message, item_type: ItemType, section: str = None,
     except FileNotFoundError:
         if call:
             try:
-                await call.message.edit_text(description, reply_markup=items_list_kb(items, item_type.value, page=page, total=total, page_size=page_size))
+                await call.message.edit_text(description, reply_markup=items_list_kb(items, item_type.value, purchased_ids, page=page, total=total, page_size=page_size))
             except TelegramBadRequest as e:
                 if "message is not modified" not in str(e):
                     raise
         else:
-            await message.answer(description, reply_markup=items_list_kb(items, item_type.value, page=page, total=total, page_size=page_size))
+            await message.answer(description, reply_markup=items_list_kb(items, item_type.value, purchased_ids, page=page, total=total, page_size=page_size))
 
 
 @router.callback_query(F.data.startswith("list:"))

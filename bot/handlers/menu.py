@@ -82,21 +82,26 @@ async def main_menu_callback(call: CallbackQuery) -> None:
         image_exists = bool(donate_image and Path(donate_image).is_file())
         try:
             if call.message.photo:
+                # Если сообщение уже с фото - просто меняем caption
+                await call.message.edit_caption(
+                    caption="Выберите сумму доната:", 
+                    reply_markup=donate_amounts_kb()
+                )
+            else:
+                # Если текстовое сообщение - удаляем и создаем новое с фото
                 if image_exists:
+                    await call.message.delete()
                     photo = FSInputFile(donate_image)
-                    await call.message.edit_media(
-                        media=InputMediaPhoto(media=photo, caption="Выберите сумму доната:"),
+                    await call.message.answer_photo(
+                        photo=photo, 
+                        caption="Выберите сумму доната:", 
                         reply_markup=donate_amounts_kb()
                     )
                 else:
-                    await call.message.edit_caption(caption="Выберите сумму доната:", reply_markup=donate_amounts_kb())
-            else:
-                if image_exists:
-                    photo = FSInputFile(donate_image)
-                    await call.message.answer_photo(photo=photo, caption="Выберите сумму доната:", reply_markup=donate_amounts_kb())
-                    await call.message.delete()
-                else:
-                    await call.message.edit_text(text="Выберите сумму доната:", reply_markup=donate_amounts_kb())
+                    await call.message.edit_text(
+                        text="Выберите сумму доната:", 
+                        reply_markup=donate_amounts_kb()
+                    )
         except Exception:
             await call.message.answer(text="Выберите сумму доната:", reply_markup=donate_amounts_kb())
             with contextlib.suppress(Exception):
@@ -130,21 +135,26 @@ async def main_menu_callback(call: CallbackQuery) -> None:
             
             try:
                 if call.message.photo:
+                    # Если сообщение с фото - просто меняем caption
+                    await call.message.edit_caption(
+                        caption=title,
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+                    )
+                else:
+                    # Если текстовое - удаляем и создаем с фото
                     if image_path and Path(image_path).is_file():
+                        await call.message.delete()
                         photo = FSInputFile(image_path)
-                        await call.message.edit_media(
-                            media=InputMediaPhoto(media=photo, caption=title),
+                        await call.message.answer_photo(
+                            photo=photo, 
+                            caption=title, 
                             reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
                         )
                     else:
-                        await call.message.edit_caption(caption=title, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
-                else:
-                    if image_path and Path(image_path).is_file():
-                        photo = FSInputFile(image_path)
-                        await call.message.answer_photo(photo=photo, caption=title, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
-                        await call.message.delete()
-                    else:
-                        await call.message.edit_text(text=title, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+                        await call.message.edit_text(
+                            text=title, 
+                            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+                        )
             except Exception:
                 await call.message.answer(text=title, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
                 with contextlib.suppress(Exception):
@@ -205,21 +215,26 @@ async def cb_back(call: CallbackQuery) -> None:
             
             try:
                 if call.message.photo:
+                    # Если сообщение с фото - просто меняем caption
+                    await call.message.edit_caption(
+                        caption=title,
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+                    )
+                else:
+                    # Если текстовое - удаляем и создаем с фото
                     if image_path and Path(image_path).is_file():
+                        await call.message.delete()
                         photo = FSInputFile(image_path)
-                        await call.message.edit_media(
-                            media=InputMediaPhoto(media=photo, caption=title),
+                        await call.message.answer_photo(
+                            photo=photo, 
+                            caption=title, 
                             reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
                         )
                     else:
-                        await call.message.edit_caption(caption=title, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
-                else:
-                    if image_path and Path(image_path).is_file():
-                        photo = FSInputFile(image_path)
-                        await call.message.answer_photo(photo=photo, caption=title, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
-                        await call.message.delete()
-                    else:
-                        await call.message.edit_text(text=title, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+                        await call.message.edit_text(
+                            text=title, 
+                            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+                        )
             except Exception:
                 await call.message.answer(text=title, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
                 with contextlib.suppress(Exception):
@@ -237,29 +252,35 @@ async def cb_back(call: CallbackQuery) -> None:
             )).scalar_one()
     
     try:
-        if "image" in texts["main_menu"]:
-            photo = FSInputFile(texts["main_menu"]["image"])
-            await call.message.edit_media(
-                media=InputMediaPhoto(
-                    media=photo,
-                    caption=texts["main_menu"]["title"],
-                    parse_mode="Markdown"
-                ),
+        image_path = texts["main_menu"].get("image")
+        if call.message.photo:
+            # Если сообщение с фото - просто меняем caption
+            await call.message.edit_caption(
+                caption=texts["main_menu"]["title"],
+                parse_mode="Markdown",
                 reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count)
             )
         else:
-            await call.message.edit_text(
-                texts["main_menu"]["title"], 
-                parse_mode="Markdown", 
-                reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count)
-            )
+            # Если текстовое - удаляем и создаем с фото
+            if image_path and Path(image_path).is_file():
+                await call.message.delete()
+                photo = FSInputFile(image_path)
+                await call.message.answer_photo(
+                    photo=photo,
+                    caption=texts["main_menu"]["title"],
+                    parse_mode="Markdown",
+                    reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count)
+                )
+            else:
+                await call.message.edit_text(
+                    texts["main_menu"]["title"], 
+                    parse_mode="Markdown", 
+                    reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count)
+                )
     except Exception:
         await call.message.answer(
             texts["main_menu"]["title"], 
             parse_mode="Markdown", 
             reply_markup=main_menu_kb(texts, is_admin=_is_admin_user(call.from_user.id, call.from_user.username), cart_count=cart_count)
         )
-        with contextlib.suppress(Exception):
-            await call.message.delete()
-    
-    await call.answer()
+

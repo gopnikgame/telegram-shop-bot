@@ -62,26 +62,21 @@ async def donate_custom_prompt(call: CallbackQuery, state: FSMContext) -> None:
     
     try:
         if call.message.photo:
-            if image_exists:
-                photo = FSInputFile(donate_image)
-                await call.message.edit_media(
-                    media=InputMediaPhoto(media=photo, caption="Введите сумму в рублях:"),
-                    reply_markup=back_kb("menu:donate")
-                )
-            else:
-                await call.message.edit_caption(
-                    caption="Введите сумму в рублях:", 
-                    reply_markup=back_kb("menu:donate")
-                )
+            # Если сообщение с фото - просто меняем caption
+            await call.message.edit_caption(
+                caption="Введите сумму в рублях:", 
+                reply_markup=back_kb("menu:donate")
+            )
         else:
+            # Если текстовое - удаляем и создаем с фото
             if image_exists:
+                await call.message.delete()
                 photo = FSInputFile(donate_image)
                 await call.message.answer_photo(
                     photo=photo, 
                     caption="Введите сумму в рублях:", 
                     reply_markup=back_kb("menu:donate")
                 )
-                await call.message.delete()
             else:
                 await call.message.edit_text(
                     "Введите сумму в рублях:", 
